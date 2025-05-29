@@ -1,9 +1,10 @@
 import base64
 import io
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import requests
+from PIL import Image
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode, ParameterTypeBuiltin
 from griptape_nodes.exe_types.node_types import ControlNode
@@ -14,7 +15,7 @@ API_KEY_ENV_VAR = "BFL_API_KEY"
 
 
 class KontextImageEdit(ControlNode):
-    """FLUX.1 Kontext image editing node for modifying existing images."""
+    """FLUX.1 Kontext image editing node."""
 
     def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
@@ -23,30 +24,40 @@ class KontextImageEdit(ControlNode):
         self.add_parameter(
             Parameter(
                 name="input_image",
-                tooltip="Input image to edit",
+                tooltip="Base image to edit",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
-                allowed_modes={ParameterMode.INPUT},
-                ui_options={"display_name": "Input Image"}
+                allowed_modes={ParameterMode.INPUT}
             )
         )
 
         self.add_parameter(
             Parameter(
                 name="prompt",
-                tooltip="Text description of what you want to edit on the image. Use quotes for text replacement: Replace '[old text]' with '[new text]'",
+                tooltip="Text description of edits. For text replacement, use: Replace '[old text]' with '[new text]'",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                ui_options={
-                    "multiline": True, 
-                    "placeholder_text": "Describe what you want to edit on the image..."
-                }
+                ui_options={"multiline": True, "placeholder_text": "Describe the edits to make to the image..."}
+            )
+        )
+
+        self.add_parameter(
+            Parameter(
+                name="aspect_ratio",
+                tooltip="Desired aspect ratio for the edited image. Supports ratios from 3:7 to 7:3.",
+                type=ParameterTypeBuiltin.STR.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value="1:1",
+                traits={Options(choices=[
+                    "3:7", "9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9", "7:3"
+                ])},
+                ui_options={"display_name": "Aspect Ratio"}
             )
         )
 
         self.add_parameter(
             Parameter(
                 name="seed",
-                tooltip="Seed for reproducibility. Leave empty for random editing.",
+                tooltip="Seed for reproducibility. Leave empty for random generation.",
                 type=ParameterTypeBuiltin.INT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 ui_options={"placeholder_text": "Enter seed (optional)"}
@@ -55,11 +66,22 @@ class KontextImageEdit(ControlNode):
 
         self.add_parameter(
             Parameter(
+                name="prompt_upsampling",
+                tooltip="If enabled, performs upsampling on the prompt for potentially better results",
+                type=ParameterTypeBuiltin.BOOL.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value=False,
+                ui_options={"display_name": "Prompt Upsampling"}
+            )
+        )
+
+        self.add_parameter(
+            Parameter(
                 name="safety_tolerance",
-                tooltip="Moderation level. 0 = most strict, 6 = most permissive",
+                tooltip="Moderation level. 0 = most strict, 6 = least strict",
                 type=ParameterTypeBuiltin.INT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=2,
+                default_value=6,
                 traits={Options(choices=["0", "1", "2", "3", "4", "5", "6"])},
                 ui_options={"display_name": "Safety Tolerance"}
             )
@@ -81,8 +103,8 @@ class KontextImageEdit(ControlNode):
         self.add_parameter(
             Parameter(
                 name="edited_image",
-                tooltip="Edited image",
-                type="ImageUrlArtifact",
+                tooltip="Edited image with cached data",
+                output_type="ImageArtifact",
                 allowed_modes={ParameterMode.OUTPUT}
             )
         )
@@ -107,21 +129,16 @@ class KontextImageEdit(ControlNode):
             )
         return api_key
 
-    def _image_to_base64(self, image_artifact: ImageArtifact | ImageUrlArtifact) -> str:
-        """Convert image artifact to base64 string."""
+    def _image_to_base64(self, image_artifact) -> str:
+        """Convert ImageArtifact or ImageUrlArtifact to base64 string."""
         try:
-            # Get the image bytes from the artifact
             image_bytes = image_artifact.to_bytes()
-            
-            # Convert to base64
-            base64_string = base64.b64encode(image_bytes).decode('utf-8')
-            return base64_string
-            
+            return base64.b64encode(image_bytes).decode('utf-8')
         except Exception as e:
             raise ValueError(f"Failed to convert image to base64: {str(e)}")
 
     def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
-        """Create an image editing request and return the request ID."""
+        """Create an editing request and return the request ID."""
         headers = {
             "accept": "application/json",
             "x-key": api_key,
@@ -186,7 +203,37 @@ class KontextImageEdit(ControlNode):
                 if attempt >= max_attempts:
                     raise
 
-        raise TimeoutError(f"Image editing timed out after {max_attempts} attempts")
+        raise TimeoutError(f"Editing timed out after {max_attempts} attempts")
+
+    def _download_image(self, image_url: str) -> bytes:
+        """Download image from URL and return bytes."""
+        try:
+            response = requests.get(image_url, timeout=30)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            raise ValueError(f"Failed to download image from URL: {str(e)}")
+
+    def _create_image_artifact(self, image_bytes: bytes, output_format: str) -> ImageArtifact:
+        """Create ImageArtifact with proper format, width, and height."""
+        try:
+            # Open image to get dimensions and format
+            image = Image.open(io.BytesIO(image_bytes))
+            width, height = image.size
+            
+            # Map output format to PIL format
+            format_map = {"jpeg": "JPEG", "png": "PNG"}
+            image_format = format_map.get(output_format.lower(), "JPEG")
+            
+            return ImageArtifact(
+                value=image_bytes,
+                name="edited_image",
+                format=image_format,
+                width=width,
+                height=height
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to create image artifact: {str(e)}")
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
@@ -205,7 +252,7 @@ class KontextImageEdit(ControlNode):
         # Check for prompt
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
-            errors.append(ValueError("Edit prompt is required and cannot be empty"))
+            errors.append(ValueError("Prompt is required and cannot be empty"))
 
         # Validate seed if provided
         seed = self.get_parameter_value("seed")
@@ -220,17 +267,20 @@ class KontextImageEdit(ControlNode):
             # Get API key
             api_key = self._get_api_key()
 
-            # Get and convert input image
+            # Get input image and convert to base64
             input_image = self.get_parameter_value("input_image")
             self.append_value_to_parameter("status", "Converting input image to base64...\n")
-            base64_image = self._image_to_base64(input_image)
+            input_image_base64 = self._image_to_base64(input_image)
 
             # Prepare request payload
+            output_format = self.get_parameter_value("output_format")
             payload = {
                 "prompt": self.get_parameter_value("prompt").strip(),
-                "input_image": base64_image,
+                "input_image": input_image_base64,
+                "aspect_ratio": self.get_parameter_value("aspect_ratio"),
+                "prompt_upsampling": self.get_parameter_value("prompt_upsampling"),
                 "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
-                "output_format": self.get_parameter_value("output_format")
+                "output_format": output_format
             }
 
             # Add seed if provided
@@ -238,23 +288,29 @@ class KontextImageEdit(ControlNode):
             if seed is not None:
                 payload["seed"] = int(seed)
 
-            self.append_value_to_parameter("status", "Creating image editing request...\n")
+            self.append_value_to_parameter("status", "Creating editing request...\n")
 
             # Create request
             request_id = self._create_request(api_key, payload)
             self.append_value_to_parameter("status", f"Request created with ID: {request_id}\n")
 
             # Poll for result
-            self.append_value_to_parameter("status", "Waiting for image editing to complete...\n")
-            edited_image_url = self._poll_for_result(api_key, request_id)
+            self.append_value_to_parameter("status", "Waiting for editing to complete...\n")
+            image_url = self._poll_for_result(api_key, request_id)
 
-            # Create image artifact
-            edited_image_artifact = ImageUrlArtifact(value=edited_image_url, name="edited_image")
-            self.parameter_output_values["edited_image"] = edited_image_artifact
+            # Download image immediately to prevent expiration issues
+            self.append_value_to_parameter("status", "Downloading edited image...\n")
+            image_bytes = self._download_image(image_url)
 
-            self.append_value_to_parameter("status", f"✅ Image editing completed successfully!\nEdited image URL: {edited_image_url}\n")
+            # Create image artifact with proper parameters
+            image_artifact = self._create_image_artifact(image_bytes, output_format)
+            
+            # Set output
+            self.parameter_output_values["edited_image"] = image_artifact
+
+            self.append_value_to_parameter("status", f"✅ Editing completed successfully!\nImage URL: {image_url}\n")
 
         except Exception as e:
-            error_msg = f"❌ Image editing failed: {str(e)}\n"
+            error_msg = f"❌ Editing failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise 

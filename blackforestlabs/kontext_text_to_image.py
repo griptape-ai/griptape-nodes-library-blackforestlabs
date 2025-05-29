@@ -1,9 +1,11 @@
-import json
+import base64
+import io
 import time
 from typing import Any, Dict, Optional
 
 import requests
-from griptape.artifacts import ImageUrlArtifact
+from PIL import Image
+from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode, ParameterTypeBuiltin
 from griptape_nodes.exe_types.node_types import ControlNode
 from griptape_nodes.traits.options import Options
@@ -92,8 +94,8 @@ class KontextTextToImage(ControlNode):
         self.add_parameter(
             Parameter(
                 name="image",
-                tooltip="Generated image",
-                type="ImageUrlArtifact",
+                tooltip="Generated image with cached data",
+                output_type="ImageArtifact",
                 allowed_modes={ParameterMode.OUTPUT}
             )
         )
@@ -186,6 +188,36 @@ class KontextTextToImage(ControlNode):
 
         raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
+    def _download_image(self, image_url: str) -> bytes:
+        """Download image from URL and return bytes."""
+        try:
+            response = requests.get(image_url, timeout=30)
+            response.raise_for_status()
+            return response.content
+        except Exception as e:
+            raise ValueError(f"Failed to download image from URL: {str(e)}")
+
+    def _create_image_artifact(self, image_bytes: bytes, output_format: str) -> ImageArtifact:
+        """Create ImageArtifact with proper format, width, and height."""
+        try:
+            # Open image to get dimensions and format
+            image = Image.open(io.BytesIO(image_bytes))
+            width, height = image.size
+            
+            # Map output format to PIL format
+            format_map = {"jpeg": "JPEG", "png": "PNG"}
+            image_format = format_map.get(output_format.lower(), "JPEG")
+            
+            return ImageArtifact(
+                value=image_bytes,
+                name="generated_image",
+                format=image_format,
+                width=width,
+                height=height
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to create image artifact: {str(e)}")
+
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
         errors = []
@@ -214,12 +246,13 @@ class KontextTextToImage(ControlNode):
             api_key = self._get_api_key()
 
             # Prepare request payload
+            output_format = self.get_parameter_value("output_format")
             payload = {
                 "prompt": self.get_parameter_value("prompt").strip(),
                 "aspect_ratio": self.get_parameter_value("aspect_ratio"),
                 "prompt_upsampling": self.get_parameter_value("prompt_upsampling"),
                 "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
-                "output_format": self.get_parameter_value("output_format")
+                "output_format": output_format
             }
 
             # Add seed if provided
@@ -237,8 +270,14 @@ class KontextTextToImage(ControlNode):
             self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
             image_url = self._poll_for_result(api_key, request_id)
 
-            # Create image artifact
-            image_artifact = ImageUrlArtifact(value=image_url, name="generated_image")
+            # Download image immediately to prevent expiration issues
+            self.append_value_to_parameter("status", "Downloading generated image...\n")
+            image_bytes = self._download_image(image_url)
+
+            # Create image artifact with proper parameters
+            image_artifact = self._create_image_artifact(image_bytes, output_format)
+            
+            # Set output
             self.parameter_output_values["image"] = image_artifact
 
             self.append_value_to_parameter("status", f"✅ Generation completed successfully!\nImage URL: {image_url}\n")
