@@ -1,10 +1,11 @@
 # Black Forest Labs Nodes for Griptape
 
-This library provides Griptape Nodes for interacting with Black Forest Labs' FLUX.1 Kontext API, enabling high-quality image generation and editing capabilities directly within your Griptape workflows.
+This library provides Griptape Nodes for interacting with Black Forest Labs' FLUX APIs, enabling high-quality image generation and editing capabilities directly within your Griptape workflows.
 
 ## Features
 
-- **FLUX.1 Kontext Text-to-Image**: Generate high-quality images from text prompts
+- **FLUX Text-to-Image**: Generate images using FLUX Pro, Dev, and Ultra models
+- **FLUX.1 Kontext Text-to-Image**: Generate high-quality images from text prompts with Kontext models
 - **FLUX.1 Kontext Image Editing**: Edit existing images with text instructions, including:
   - Object modifications (colors, shapes, elements)
   - Text editing within images
@@ -54,10 +55,29 @@ Or configure it through the Griptape Nodes UI:
 
 ## Available Nodes
 
+### FLUX Text-to-Image
+
+Generate high-quality images using general FLUX models with advanced control options:
+
+- **Model**: Choose from:
+  - `flux-pro-1.1-ultra` (highest quality)
+  - `flux-pro-1.1` (balanced, default)
+  - `flux-pro` (standard)
+  - `flux-dev` (open-source)
+- **Prompt**: Text description of the desired image
+- **Aspect Ratio**: Wide range from 21:9 to 9:21 (ultra-wide to tall formats)
+- **Seed**: For reproducible generation
+- **Raw Mode**: Generate less processed, more natural-looking images
+- **Safety Tolerance**: Content moderation level (1-6)
+- **Output Format**: JPEG or PNG
+
 ### FLUX.1 Kontext Text-to-Image
 
-Generate images from text descriptions with advanced control options:
+Generate images from text descriptions using specialized Kontext models:
 
+- **Model**: Choose between:
+  - `flux-kontext-pro` (faster generation, default)
+  - `flux-kontext-max` (higher quality)
 - **Prompt**: Text description of the desired image
 - **Aspect Ratio**: Choose from 3:7 to 7:3 ratios (supports portrait, landscape, square)
 - **Seed**: For reproducible generation
@@ -67,30 +87,57 @@ Generate images from text descriptions with advanced control options:
 
 ### FLUX.1 Kontext Image Edit
 
-Modify existing images using text instructions:
+Modify existing images using text instructions with Kontext models:
 
+- **Model**: Choose between `flux-kontext-pro` or `flux-kontext-max`
 - **Input Image**: Accepts both ImageArtifact and ImageUrlArtifact
 - **Prompt**: Edit instructions (use quotes for text replacement: `Replace '[old text]' with '[new text]'`)
+- **Aspect Ratio**: Choose from 3:7 to 7:3 ratios
 - **Seed**: For reproducible edits
+- **Prompt Upsampling**: Enhanced prompt processing
 - **Safety Tolerance**: Content moderation level (0-6, wider range than text-to-image)
 - **Output Format**: JPEG or PNG
+
+## Model Comparison
+
+### When to Use FLUX vs Kontext
+
+**Use FLUX Text-to-Image for:**
+- Traditional text-to-image generation
+- Ultra-high quality with FLUX Pro Ultra
+- Open-source workflows with FLUX Dev
+- Wide aspect ratios (21:9 to 9:21)
+- Raw, natural-looking images
+
+**Use FLUX.1 Kontext for:**
+- Advanced image editing workflows
+- Iterative editing with consistency
+- Text replacement in images
+- Character preservation across edits
 
 ## Example Workflows
 
 ### Basic Image Generation
 
-1. Add a **FLUX.1 Kontext Text-to-Image** node
-2. Set your prompt: `"A small furry elephant pet looks out from a cat house"`
-3. Choose your aspect ratio (default: 1:1)
-4. Run the workflow
-5. The generated image will be available as an ImageUrlArtifact output
+1. Add a **FLUX Text-to-Image** node
+2. Choose your model (flux-pro-1.1 for balanced quality/speed)
+3. Set your prompt: `"A small furry elephant pet looks out from a cat house"`
+4. Choose your aspect ratio (default: 1:1)
+5. Run the workflow
+6. The generated image will be available as an ImageArtifact output
+
+### High-Quality Generation
+
+1. Use **FLUX Text-to-Image** with `flux-pro-1.1-ultra` model
+2. Enable **Raw Mode** for natural-looking results
+3. Use wide aspect ratios for cinematic shots
 
 ### Image Editing Pipeline
 
 ![Example Flow](images/example-flow.png)
 
-1. **Generate Base Image**: Use Text-to-Image to create your starting image
-2. **Edit the Image**: Connect the output to Image Edit node
+1. **Generate Base Image**: Use FLUX.1 Kontext Text-to-Image to create your starting image
+2. **Edit the Image**: Connect the output to FLUX.1 Kontext Image Edit node
 3. **Add Edit Instructions**: 
    - Object changes: `"Change the car color to red"`
    - Text replacement: `Replace 'Hello' with 'Welcome'`
@@ -98,7 +145,7 @@ Modify existing images using text instructions:
 
 ### Text Editing in Images
 
-For precise text editing, use the quote syntax:
+For precise text editing, use the quote syntax with Kontext Image Edit:
 
 ```
 Replace 'Choose joy' with 'FLUX Rocks'
@@ -124,9 +171,10 @@ Use the `seed` parameter to generate consistent results:
 
 ### Safety Controls
 
-Both nodes include safety tolerance settings:
-- **Text-to-Image**: 0-2 (2 = least restrictive)
-- **Image Edit**: 0-6 (6 = least restrictive)
+All nodes include safety tolerance settings:
+- **FLUX Text-to-Image**: 1-6 (2 = default)
+- **FLUX.1 Kontext Text-to-Image**: 0-2 (2 = least restrictive)
+- **FLUX.1 Kontext Image Edit**: 0-6 (6 = least restrictive)
 
 Higher values allow more creative freedom but may generate content that requires review.
 
@@ -134,6 +182,7 @@ Higher values allow more creative freedom but may generate content that requires
 
 For detailed API information and advanced usage:
 
+- [Black Forest Labs API Documentation](https://docs.bfl.ml/quick_start/generating_images)
 - [FLUX.1 Kontext Text-to-Image Documentation](https://docs.bfl.ml/kontext/kontext_text_to_image)
 - [FLUX.1 Kontext Image Editing Documentation](https://docs.bfl.ml/kontext/kontext_image_editing)
 - [Black Forest Labs API Reference](https://docs.bfl.ml/)

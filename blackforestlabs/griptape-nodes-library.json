@@ -3,7 +3,7 @@
     "library_schema_version": "0.1.0",
     "metadata": {
         "author": "Griptape",
-        "description": "Griptape Nodes for Black Forest Labs APIs including FLUX.1 Kontext text-to-image generation and image editing",
+        "description": "Griptape Nodes for Black Forest Labs APIs including FLUX.1 Kontext and FLUX text-to-image generation and image editing",
         "library_version": "0.1.0",
         "engine_version": "0.1.0",
         "tags": [
@@ -21,12 +21,21 @@
             "BlackForestLabs": {
                 "color": "border-purple-500",
                 "title": "Black Forest Labs",
-                "description": "FLUX.1 Kontext nodes for image generation and editing",
+                "description": "FLUX nodes for image generation and editing",
                 "icon": "Image"
             }
         }
     ],
     "nodes": [
+        {
+            "class_name": "TextToImage",
+            "file_path": "text_to_image.py",
+            "metadata": {
+                "category": "BlackForestLabs",
+                "description": "Generate high-quality images from text prompts using FLUX Pro, Dev, and Ultra models",
+                "display_name": "FLUX Text-to-Image"
+            }
+        },
         {
             "class_name": "KontextTextToImage",
             "file_path": "kontext_text_to_image.py",
