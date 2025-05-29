@@ -23,6 +23,18 @@ class KontextTextToImage(ControlNode):
         # Input parameters
         self.add_parameter(
             Parameter(
+                name="model",
+                tooltip="FLUX.1 Kontext model to use. Pro is faster, Max has higher quality.",
+                type=ParameterTypeBuiltin.STR.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value="flux-kontext-pro",
+                traits={Options(choices=["flux-kontext-pro", "flux-kontext-max"])},
+                ui_options={"display_name": "Model"}
+            )
+        )
+
+        self.add_parameter(
+            Parameter(
                 name="prompt",
                 tooltip="Text description of the desired image",
                 type=ParameterTypeBuiltin.STR.value,
@@ -128,8 +140,11 @@ class KontextTextToImage(ControlNode):
             "Content-Type": "application/json"
         }
 
+        # Get selected model for API endpoint
+        model = self.get_parameter_value("model")
+        
         response = requests.post(
-            "https://api.us1.bfl.ai/v1/flux-kontext-pro",
+            f"https://api.us1.bfl.ai/v1/{model}",
             headers=headers,
             json=payload,
             timeout=30
