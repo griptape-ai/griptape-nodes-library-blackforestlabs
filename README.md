@@ -1,319 +1,175 @@
-# Griptape Nodes: Node Library Template
+# Black Forest Labs Nodes for Griptape
 
-Hi! Welcome to Griptape Nodes. 
-This is a guide to write your own nodes and node library, in order to use in our [Griptape Nodes](https://www.griptapenodes.com/) platform. 
+This library provides Griptape Nodes for interacting with Black Forest Labs' FLUX.1 Kontext API, enabling high-quality image generation and editing capabilities directly within your Griptape workflows.
 
-## Use this Template
-Create your own repository using this GitHub Template. Use the Template button in the top right. 
+## Features
 
-Once you've created your own repository from this template, you need to pull it down to your local machine, or the machine where you are running your Griptape Nodes Engine. 
+- **FLUX.1 Kontext Text-to-Image**: Generate high-quality images from text prompts
+- **FLUX.1 Kontext Image Editing**: Edit existing images with text instructions, including:
+  - Object modifications (colors, shapes, elements)
+  - Text editing within images
+  - Smart, natural-looking changes
+  - Iterative editing with character consistency
 
-> **Hint**: It's recommended to clone this repository into your Griptape Nodes workspace directory. You can find your workspace directory by running:
-> ```bash
-> gtn config | grep workspace_directory
-> ```
-> Here's a quick way to navigate to your workspace directory:
-> ```bash
-> cd $(gtn config | grep workspace_directory | cut -d'"' -f4)
-> ```
-> Finally, clone the repository:
-> ```bash
-> git clone https://github.com/{{ .RepoName }}.git
-> ```
+## Installation
 
-## Rename Directory
+1. Clone this repository into your Griptape Nodes workspace directory:
 
-To create your node library and make it importable by other users, please follow the steps below.
+```bash
+# Navigate to your workspace directory
+cd $(gtn config | grep workspace_directory | cut -d'"' -f4)
 
-1. rename `example_nodes_template` to the name of your library.
-2. Update the `pyproject.toml`:
-    ```
-    [project]
-    name = "<your-library-name>"
-    version = "0.1.0"
-    description = "<your-description>"
-    authors = [
-        {name = "<Your-Name>",email = "<you@example.com>"}
-    ]
-    ```
-
-Next, we'll create the nodes that will live in your library.
-
-Each node is it's own python file, written in pure python code!
-
-To create nodes for your library, please take a look at our provided examples in the `example_nodes_template` library and follow the steps below.
-
-[Example Data Node](example_nodes_template/data_node.py)
-
-
-[Example Control Node](example_nodes_template/control_node.py)
-
-
-[Example Node with Dependencies](example_nodes_template/dependency_node.py)
-
-
-## Define a file with your node name
-Define a `<your-node-name>.py` file in your `<your-library-name>` directory. 
-
-## Define the Node Class
-There are two different types of Nodes that you could choose to define.
-
-1. **ControlNode**
-    Has Parameters that allow for configuring a control flow. They create the main path of the flow upon run. 
-2. **DataNode**
-    Solely has parameters that define and create data values. They can be dependencies of nodes on the main flow, but don't have control inputs/outputs.
-    *You can add ControlParameters to a DataNode if desired to give it the functionality of a ControlNode.*
-
-Within your `<your-node-name>.py`.
-Add this import at the top of your file and define your Node or Nodes as a class. 
-
-```
-from griptape_nodes.exe_types.node_types import ControlNode, DataNode
-from griptape_nodes.exe_types.core_types import Parameter
-
-# Creating a Control Node
-class <YourNodeName>(ControlNode):
-    pass
-
-# Creating a Data Node
-class <YourNodeName>(DataNode):
-    pass
+# Clone the repository
+git clone https://github.com/griptape-ai/griptape-nodes-library-blackforestlabs.git
 ```
 
-## Initialize your Node and define your Parameters
+2. Install dependencies:
 
-Parameters are fields on the node that can be connected to other nodes or set by the user. 
-Parameters have many fields that can be configured for their desired behavior. 
-Only a couple of the fields are mandatory. The rest are optional.
-
-### Parameter Fields 
-1. name: `str` The name of the parameter. Must be unique to the node.
-2. tooltip: `str | list[dict]` The description that will appear upon hovering the mouse.
-3. type: `str` *OPTIONAL* The type of the value in the parameter. If not defined, it will be whatever the python type is.
-4. input_types: `list[str]` *OPTIONAL* The allowed list of types that can be connected as an INPUT to your parameter.
-5. output_type: `str` *OPTIONAL* The type that the OUTPUT of your parameter will be.
-6. default_value: Any *OPTIONAL* A default value for your parameter if it isn't set
-7. tooltip_as_input: `str | list[dict]` *OPTIONAL* Tooltip on the input port
-8. tooltip_as_property: `str | list[dict]` *OPTIONAL* Tooltip on the property displapy
-9. tooltip_as_output: `str | list[dict]` *OPTIONAL* Tooltip on the output port
-10. allowed_modes: `set[ParameterMode]` 
-    *OPTIONAL* The allowed modes. 
-    `ParameterMode.INPUT`: Accepts inputs 
-    `ParameterMode.OUTPUT`: Sends output
-    `ParameterMode.PROPERTY`: Can be set on the node itself. 
-11. ui_options: `dict`  *OPTIONAL* Informs the display of your node.
-12. traits: `set[type[Trait] | Trait]` *OPTIONAL* Reusable classes that define features on a parameter, including converters and UI options. They are inheritable!
-13. converters: `list[Callable[[Any], Any]]` *OPTIONAL* Modifies the parameter value after being set if needed.
-14. validators: `list[Callable[[Parameter, Any], None]]` *OPTIONAL* Validates that the value on the parameter is correct.
-
-## Define Node Method
-
-Nodes have one absolute method that *absolutely* (haha) must be defined.
-This is the method that is called by the node at runtime when a node executes. 
-It completes the function of your node, whether thats creating a string, generating an image, or creating an agent.
-```
-def process(self) -> None:
-    pass
-```
-### Additional Optional Methods
-Nodes have additional methods that can provide functionality at or before runtime (and you can define as many helper functions as you'd like.)
-1. Validate Node
-``` 
-def validate_node(self) -> list[Exception] | None:
-        """Method called to check that all dependencies, like API keys or models, exist in the environment before running the workflow. 
-        The default behavior is to return None. Custom Nodes that have dependencies will overwrite this method in order to return exceptions if the environment isn't set.
-        For example, a node that uses an OpenAI API Key will check that it is set in the environment and that the key is valid. 
-
-        Returns:
-            A list of exceptions if any arise, or None. The user can define their own custom exceptions, or use provided python exceptions. 
-        """
-```
-2. Before setting a value on a parameter
-```
-def before_value_set(self, parameter: Parameter, value: Any, modified_parameters_set: set[str]) -> Any:
-    """Callback when a Parameter's value is ABOUT to be set.
-
-        Custom nodes may elect to override the default behavior by implementing this function in their node code.
-
-        This gives the node an opportunity to perform custom logic before a parameter is set. This may result in:
-        * Further mutating the value that would be assigned to the Parameter
-        * Mutating other Parameters or state within the Node
-
-        If other Parameters are changed, the engine needs a list of which
-        ones have changed to cascade unresolved state.
-
-        Args:
-            parameter: the Parameter on this node that is about to be changed
-            value: the value intended to be set (this has already gone through any converters and validators on the Parameter)
-            modified_parameters_set: A set of parameter names within this node that were modified as a result
-                of this call. The Parameter this was called on does NOT need to be part of the return.
-
-        Returns:
-            The final value to set for the Parameter. This gives the Node logic one last opportunity to mutate the value
-            before it is assigned.
-        """
-```
-3. After setting a value on a parameter
-```
-def after_value_set(self, parameter: Parameter, value: Any, modified_parameters_set: set[str]) -> None: 
-        """Callback AFTER a Parameter's value was set.
-
-        Custom nodes may elect to override the default behavior by implementing this function in their node code.
-
-        This gives the node an opportunity to perform custom logic after a parameter is set. This may result in
-        changing other Parameters on the node. If other Parameters are changed, the engine needs a list of which
-        ones have changed to cascade unresolved state.
-
-        Args:
-            parameter: the Parameter on this node that was just changed
-            value: the value that was set (already converted, validated, and possibly mutated by the node code)
-            modified_parameters_set: A set of parameter names within this node that were modified as a result
-                of this call. The Parameter this was called on does NOT need to be part of the return.
-
-        Returns:
-            Nothing
-        """
-```
-4. Checking if a connections to the node are allowed. 
-The default value is true, but Custom nodes can implement this method however they'd like to control connections.
-```
-def allow_incoming_connection(
-        self,
-        source_node: Self,
-        source_parameter: Parameter, 
-        target_parameter: Parameter, 
-    ) -> bool:
-        """Callback to confirm allowing a Connection coming TO this Node.
-        """
-        return True
-```
-```
-def allow_outgoing_connection(
-        self,
-        source_parameter: Parameter,  # noqa: ARG002
-        target_node: Self,  # noqa: ARG002
-        target_parameter: Parameter,  # noqa: ARG002
-    ) -> bool:
-        """Callback to confirm allowing a Connection going OUT of this Node."""
-        return True
-```
-5. Callbacks AFTER creating or removing a connection
-```
-def after_incoming_connection(
-        self,
-        source_node: Self,  # noqa: ARG002
-        source_parameter: Parameter,  # noqa: ARG002
-        target_parameter: Parameter,  # noqa: ARG002
-    ) -> None:
-        """Callback after a Connection has been established TO this Node."""
-        return
-```
-```
-def after_outgoing_connection(
-        self,
-        source_parameter: Parameter,  # noqa: ARG002
-        target_node: Self,  # noqa: ARG002
-        target_parameter: Parameter,  # noqa: ARG002
-    ) -> None:
-        """Callback after a Connection has been established OUT of this Node."""
-        return
-
-```
-```
-def after_incoming_connection_removed(
-        self,
-        source_node: Self,  # noqa: ARG002
-        source_parameter: Parameter,  # noqa: ARG002
-        target_parameter: Parameter,  # noqa: ARG002
-    ) -> None:
-        """Callback after a Connection TO this Node was REMOVED."""
-        return
-```
-```
-def after_outgoing_connection_removed(
-        self,
-        source_parameter: Parameter,  # noqa: ARG002
-        target_node: Self,  # noqa: ARG002
-        target_parameter: Parameter,  # noqa: ARG002
-    ) -> None:
-        """Callback after a Connection OUT of this Node was REMOVED."""
-        return
+```bash
+cd griptape-nodes-library-blackforestlabs
+uv sync
 ```
 
+## API Key Setup
 
-## Add Node to Library
-In order to add a node to a library, you must configure your JSON file. This will keep track of all of the nodes in your library and allow them to be loaded on runtime!
+You'll need a Black Forest Labs API key to use these nodes.
 
-## Create your library as a JSON file. This will be copied and imported into the engine at runtime.
+### Get Your API Key
 
-```
-{
-    # Information about your library
-    "name": "<Your-Library-Name>",
-    "library_schema_version": "0.1.0",
-    "metadata": {
-        "author": "<Your-Name>",
-        "description": "<Your Description>",
-        "library_version": "0.1.0",
-        "engine_version": "0.1.0",
-        "tags": [
-            "Griptape",
-            "AI"
-        ]
-    },
-    # Categories define different sections that you can organize your node into. These are UI hints that group how your nodes will be displayed within your library.
-    "categories": [
-        {
-            # The ID of your category
-            "Category1": {
-                # These are all UI hints for the Editor
-                "color": "border-red-500",
-                "title": "Category1",
-                "description": "<Your Description>",
-                "icon": "Scale"
-            }
-        },
-    ],
-    # What nodes exist in this library?
-    "nodes": [
-        {   
-            # The name of the class you defined in your <your-node-name>.py
-            "class_name": "<YourNodeName>",
-            # The relative file path to your node.
-            "file_path": "<your-library-name>/<your-node-name>.py",
-            "metadata": {
-                # What category should this node be displayed in?
-                "category": "Category1",
-                "description": "<Your Description>",
-                # The name you'd like displayed on Griptape Nodes.
-                "display_name": "<Your Node Name>"
-            }
-        }
-    ]
-}
+1. Visit [Black Forest Labs Documentation](https://docs.bfl.ml/) 
+2. Create an account and navigate to your API settings
+3. Generate a new API key
+
+### Configure Your API Key
+
+Set your API key as an environment variable:
+
+```bash
+export BFL_API_KEY="your_api_key_here"
 ```
 
-## Add your library to your installed Engine! 
+Or configure it through the Griptape Nodes UI:
 
-If you haven't already installed your Griptape Nodes engine, follow the installation steps [HERE](https://github.com/griptape-ai/griptape-nodes).
-After you've completed those and you have your engine up and running: 
+![API Key Setup](images/api-key.png)
 
+## Available Nodes
 
-1. Copy the path to your `library.json`. Right click on the file, and `Copy Path` (Not `Copy Relative Path`)
-![Copy path of the library.json](./images/get_json_path.png)
-2. Start up the engine! 
-3. Navigate to settings
-![Open Settings](./images/open_settings.png)
-4. Open your settings and go to the App Events tab. Add an item in **Libraries to Register**
-![Add Library to Register](./images/add_library.png)
-5. Paste your copied `library.json` path from earlier into the new item 
-![Paste in your absolute path](./images/paste_library.png)
-6. Exit out of Settings. It will save automatically! 
-7. Open up the **Libraries** dropdown on the left sidebar 
-![See Libraries](./images/see_libraries.png)
-8. Your newly registered library should appear! Drag and drop nodes to use them!
-![Library Display](./images/final_image.png)
+### FLUX.1 Kontext Text-to-Image
 
+Generate images from text descriptions with advanced control options:
 
-### Here is an example flow that you could make with the provided nodes:
-![Example Flow](./images/example_flow.png)
+- **Prompt**: Text description of the desired image
+- **Aspect Ratio**: Choose from 3:7 to 7:3 ratios (supports portrait, landscape, square)
+- **Seed**: For reproducible generation
+- **Prompt Upsampling**: Enhanced prompt processing
+- **Safety Tolerance**: Content moderation level (0-2)
+- **Output Format**: JPEG or PNG
+
+### FLUX.1 Kontext Image Edit
+
+Modify existing images using text instructions:
+
+- **Input Image**: Accepts both ImageArtifact and ImageUrlArtifact
+- **Prompt**: Edit instructions (use quotes for text replacement: `Replace '[old text]' with '[new text]'`)
+- **Seed**: For reproducible edits
+- **Safety Tolerance**: Content moderation level (0-6, wider range than text-to-image)
+- **Output Format**: JPEG or PNG
+
+## Example Workflows
+
+### Basic Image Generation
+
+1. Add a **FLUX.1 Kontext Text-to-Image** node
+2. Set your prompt: `"A small furry elephant pet looks out from a cat house"`
+3. Choose your aspect ratio (default: 1:1)
+4. Run the workflow
+5. The generated image will be available as an ImageUrlArtifact output
+
+### Image Editing Pipeline
+
+![Example Flow](images/example-flow.png)
+
+1. **Generate Base Image**: Use Text-to-Image to create your starting image
+2. **Edit the Image**: Connect the output to Image Edit node
+3. **Add Edit Instructions**: 
+   - Object changes: `"Change the car color to red"`
+   - Text replacement: `Replace 'Hello' with 'Welcome'`
+   - Style changes: `"Make it look like a painting"`
+
+### Text Editing in Images
+
+For precise text editing, use the quote syntax:
+
+```
+Replace 'Choose joy' with 'FLUX Rocks'
+```
+
+This works particularly well for:
+- Signs and posters
+- Labels and captions
+- Brand text replacement
+
+## Advanced Features
+
+### Iterative Editing
+
+FLUX.1 Kontext excels at maintaining consistency across multiple edits. You can chain multiple Image Edit nodes to make progressive changes while preserving character and scene consistency.
+
+### Reproducible Results
+
+Use the `seed` parameter to generate consistent results:
+- Same prompt + same seed = same image
+- Useful for A/B testing different prompts
+- Essential for collaborative workflows
+
+### Safety Controls
+
+Both nodes include safety tolerance settings:
+- **Text-to-Image**: 0-2 (2 = least restrictive)
+- **Image Edit**: 0-6 (6 = least restrictive)
+
+Higher values allow more creative freedom but may generate content that requires review.
+
+## API Documentation
+
+For detailed API information and advanced usage:
+
+- [FLUX.1 Kontext Text-to-Image Documentation](https://docs.bfl.ml/kontext/kontext_text_to_image)
+- [FLUX.1 Kontext Image Editing Documentation](https://docs.bfl.ml/kontext/kontext_image_editing)
+- [Black Forest Labs API Reference](https://docs.bfl.ml/)
+
+## Troubleshooting
+
+### Common Issues
+
+**"API key not found"**
+- Ensure `BFL_API_KEY` environment variable is set
+- Check the API key is valid and active
+
+**"404 Not Found"**
+- Verify you're using the latest version of the library
+- Check your internet connection
+
+**"Generation failed with status 'Pending'"**
+- This should resolve automatically - the node polls until completion
+- Large images or complex edits may take longer
+
+**Image connection errors**
+- Image Edit node accepts both ImageArtifact and ImageUrlArtifact
+- Ensure the input image is properly connected
+
+### Getting Help
+
+If you encounter issues:
+
+1. Check the [Black Forest Labs Documentation](https://docs.bfl.ml/)
+2. Verify your API key and account status
+3. Review the node's status output for detailed error messages
+
+## License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
