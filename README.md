@@ -43,13 +43,12 @@ You'll need a Black Forest Labs API key to use these nodes.
 
 ### Configure Your API Key
 
-Set your API key as an environment variable:
+Configure your API key through the Griptape Nodes IDE:
 
-```bash
-export BFL_API_KEY="your_api_key_here"
-```
-
-Or configure it through the Griptape Nodes UI:
+1. Open the **Settings** menu.
+2. Navigate to the **API Keys & Secrets** panel.
+3. Add a new secret configuration for the service named `BlackForest Labs`.
+4. Enter your `BFL_API_KEY` in the respective field.
 
 ![API Key Setup](images/api-key.png)
 
@@ -212,7 +211,7 @@ For detailed API information and advanced usage:
 ### Common Issues
 
 **"API key not found"**
-- Ensure `BFL_API_KEY` environment variable is set
+- Ensure your `BFL_API_KEY` is configured in the Griptape Nodes IDE Settings → API Keys & Secrets
 - Check the API key is valid and active
 
 **"404 Not Found"**
