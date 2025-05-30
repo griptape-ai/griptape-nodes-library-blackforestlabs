@@ -9,6 +9,7 @@ from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode, ParameterTypeBuiltin
 from griptape_nodes.exe_types.node_types import ControlNode
 from griptape_nodes.traits.options import Options
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
@@ -116,7 +117,7 @@ class KontextImageEdit(ControlNode):
             Parameter(
                 name="edited_image",
                 tooltip="Edited image with cached data",
-                output_type="ImageArtifact",
+                output_type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.OUTPUT}
             )
         )
@@ -144,8 +145,20 @@ class KontextImageEdit(ControlNode):
     def _image_to_base64(self, image_artifact) -> str:
         """Convert ImageArtifact or ImageUrlArtifact to base64 string."""
         try:
-            image_bytes = image_artifact.to_bytes()
-            return base64.b64encode(image_bytes).decode('utf-8')
+            # Try the standard to_bytes() method first
+            try:
+                image_bytes = image_artifact.to_bytes()
+                return base64.b64encode(image_bytes).decode('utf-8')
+            except (AttributeError, Exception):
+                # If to_bytes() fails, try to fetch from URL for ImageUrlArtifact
+                if isinstance(image_artifact, ImageUrlArtifact):
+                    response = requests.get(image_artifact.value, timeout=30)
+                    response.raise_for_status()
+                    image_bytes = response.content
+                    return base64.b64encode(image_bytes).decode('utf-8')
+                else:
+                    # Re-raise the original exception if it's not an ImageUrlArtifact
+                    raise
         except Exception as e:
             raise ValueError(f"Failed to convert image to base64: {str(e)}")
 
@@ -229,23 +242,18 @@ class KontextImageEdit(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to download image from URL: {str(e)}")
 
-    def _create_image_artifact(self, image_bytes: bytes, output_format: str) -> ImageArtifact:
-        """Create ImageArtifact with proper format, width, and height."""
+    def _create_image_artifact(self, image_bytes: bytes, output_format: str) -> ImageUrlArtifact:
+        """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
         try:
-            # Open image to get dimensions and format
-            image = Image.open(io.BytesIO(image_bytes))
-            width, height = image.size
+            # Generate filename with proper extension
+            filename = f"edited_image.{output_format.lower()}"
             
-            # Map output format to PIL format
-            format_map = {"jpeg": "JPEG", "png": "PNG"}
-            image_format = format_map.get(output_format.lower(), "JPEG")
+            # Save to managed file location and get URL
+            static_url = GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
             
-            return ImageArtifact(
-                value=image_bytes,
-                name="edited_image",
-                format=image_format,
-                width=width,
-                height=height
+            return ImageUrlArtifact(
+                value=static_url,
+                name="edited_image"
             )
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
