@@ -245,15 +245,18 @@ class KontextImageEdit(ControlNode):
     def _create_image_artifact(self, image_bytes: bytes, output_format: str) -> ImageUrlArtifact:
         """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
         try:
-            # Generate filename with proper extension
-            filename = f"edited_image.{output_format.lower()}"
+            # Generate unique filename with timestamp and hash
+            import hashlib
+            timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+            content_hash = hashlib.md5(image_bytes).hexdigest()[:8]  # Short hash of content
+            filename = f"kontext_image_edit_{timestamp}_{content_hash}.{output_format.lower()}"
             
             # Save to managed file location and get URL
             static_url = GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
             
             return ImageUrlArtifact(
                 value=static_url,
-                name="edited_image"
+                name=f"kontext_image_edit_{timestamp}"
             )
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
