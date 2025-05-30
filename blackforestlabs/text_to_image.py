@@ -355,7 +355,6 @@ class TextToImage(ControlNode):
             output_format = self.get_parameter_value("output_format")
 
             # Extract width and height from image_size
-            print(self.get_parameter_value("image_size"))
             image_size = self.get_parameter_value("image_size")
             try:
                 width, height = map(int, image_size.split('x'))
@@ -371,8 +370,6 @@ class TextToImage(ControlNode):
                 "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
                 "output_format": output_format,
             }
-
-            print(payload)
 
             # Add seed if provided
             seed = self.get_parameter_value("seed")
