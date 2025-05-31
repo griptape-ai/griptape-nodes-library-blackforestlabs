@@ -6,10 +6,15 @@ from typing import Any, Dict, Optional
 import requests
 from PIL import Image
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode, ParameterTypeBuiltin
+from griptape_nodes.exe_types.core_types import (
+    Parameter,
+    ParameterMode,
+    ParameterTypeBuiltin,
+)
 from griptape_nodes.exe_types.node_types import ControlNode
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.slider import Slider
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
@@ -29,13 +34,17 @@ class TextToImage(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="flux-pro-1.1",
-                traits={Options(choices=[
-                    "flux-pro-1.1-ultra", 
-                    "flux-pro-1.1", 
-                    "flux-pro", 
-                    "flux-dev"
-                ])},
-                ui_options={"display_name": "Model"}
+                traits={
+                    Options(
+                        choices=[
+                            "flux-pro-1.1-ultra",
+                            "flux-pro-1.1",
+                            "flux-pro",
+                            "flux-dev",
+                        ]
+                    )
+                },
+                ui_options={"display_name": "Model"},
             )
         )
 
@@ -45,7 +54,10 @@ class TextToImage(ControlNode):
                 tooltip="Text description of the desired image",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                ui_options={"multiline": True, "placeholder_text": "Describe the image you want to generate..."}
+                ui_options={
+                    "multiline": True,
+                    "placeholder_text": "Describe the image you want to generate...",
+                },
             )
         )
 
@@ -56,10 +68,47 @@ class TextToImage(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="1:1",
-                traits={Options(choices=[
-                    "21:9", "16:9", "3:2", "4:3", "1:1", "3:4", "2:3", "9:16", "9:21"
-                ])},
-                ui_options={"display_name": "Aspect Ratio"}
+                traits={
+                    Options(
+                        choices=[
+                            "21:9",
+                            "16:9",
+                            "3:2",
+                            "4:3",
+                            "1:1",
+                            "3:4",
+                            "2:3",
+                            "9:16",
+                            "9:21",
+                        ]
+                    )
+                },
+                ui_options={"display_name": "Aspect Ratio"},
+            )
+        )
+
+        self.add_parameter(
+            Parameter(
+                name="max_size",
+                tooltip="Maximum size in pixels.",
+                type=ParameterTypeBuiltin.INT.value,
+                allowed_modes={ParameterMode.OUTPUT, ParameterMode.PROPERTY},
+                traits={Slider(min_val=256, max_val=1440)},
+                default_value=1024,
+                ui_options={"display_name": "Max Size",
+                            "step": 32
+                            },
+            )
+        )
+
+        self.add_parameter(
+            Parameter(
+                name="image_size",
+                tooltip="Calculated image size based on max size and aspect ratio.",
+                type=ParameterTypeBuiltin.STR.value,
+                allowed_modes={ParameterMode.OUTPUT, ParameterMode.PROPERTY},
+                default_value="1024x1024",
+                ui_options={"display_name": "Image Size"},
             )
         )
 
@@ -69,7 +118,7 @@ class TextToImage(ControlNode):
                 tooltip="Seed for reproducibility. Leave empty for random generation.",
                 type=ParameterTypeBuiltin.INT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                ui_options={"placeholder_text": "Enter seed (optional)"}
+                ui_options={"placeholder_text": "Enter seed (optional)"},
             )
         )
 
@@ -80,7 +129,7 @@ class TextToImage(ControlNode):
                 type=ParameterTypeBuiltin.BOOL.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=False,
-                ui_options={"display_name": "Raw Mode"}
+                ui_options={"display_name": "Raw Mode"},
             )
         )
 
@@ -92,7 +141,7 @@ class TextToImage(ControlNode):
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=2,
                 traits={Options(choices=["1", "2", "3", "4", "5", "6"])},
-                ui_options={"display_name": "Safety Tolerance"}
+                ui_options={"display_name": "Safety Tolerance"},
             )
         )
 
@@ -104,7 +153,7 @@ class TextToImage(ControlNode):
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="jpeg",
                 traits={Options(choices=["jpeg", "png"])},
-                ui_options={"display_name": "Output Format"}
+                ui_options={"display_name": "Output Format"},
             )
         )
 
@@ -114,7 +163,7 @@ class TextToImage(ControlNode):
                 name="image",
                 tooltip="Generated image with cached data",
                 output_type="ImageUrlArtifact",
-                allowed_modes={ParameterMode.OUTPUT}
+                allowed_modes={ParameterMode.OUTPUT},
             )
         )
 
@@ -124,9 +173,34 @@ class TextToImage(ControlNode):
                 tooltip="Generation status and progress",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.OUTPUT},
-                ui_options={"multiline": True, "pulse_on_run": True}
+                ui_options={"multiline": True, "pulse_on_run": True},
             )
         )
+
+    def _calculate_image_size(self, max_size: int, aspect_ratio: str) -> str:
+        # Parse the aspect ratio
+        try:
+            width_ratio, height_ratio = map(int, aspect_ratio.split(':'))
+        except ValueError:
+            raise ValueError("Invalid aspect ratio format. Expected format 'width:height'.")
+
+        # Ensure max_size is an integer
+        if not isinstance(max_size, int):
+            raise ValueError("max_size must be an integer.")
+
+        # Calculate initial dimensions
+        if width_ratio > height_ratio:
+            width = max_size
+            height = int((max_size / width_ratio) * height_ratio)
+        else:
+            height = max_size
+            width = int((max_size / height_ratio) * width_ratio)
+
+        # Adjust dimensions to be multiples of 32
+        width = (width // 32) * 32
+        height = (height // 32) * 32
+
+        return f"{width}x{height}"
 
     def _get_api_key(self) -> str:
         """Retrieve the BFL API key from configuration."""
@@ -143,17 +217,17 @@ class TextToImage(ControlNode):
         headers = {
             "accept": "application/json",
             "x-key": api_key,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         # Get selected model for API endpoint
         model = self.get_parameter_value("model")
-        
+
         response = requests.post(
             f"https://api.us1.bfl.ai/v1/{model}",
             headers=headers,
             json=payload,
-            timeout=30
+            timeout=30,
         )
         response.raise_for_status()
 
@@ -165,10 +239,7 @@ class TextToImage(ControlNode):
 
     def _poll_for_result(self, api_key: str, request_id: str) -> str:
         """Poll for the generation result and return the image URL."""
-        headers = {
-            "accept": "application/json",
-            "x-key": api_key
-        }
+        headers = {"accept": "application/json", "x-key": api_key}
 
         max_attempts = 120  # 3 minutes with 1.5s intervals
         attempt = 0
@@ -181,14 +252,16 @@ class TextToImage(ControlNode):
                 response = requests.get(
                     f"https://api.us1.bfl.ai/v1/get_result?id={request_id}",
                     headers=headers,
-                    timeout=30
+                    timeout=30,
                 )
                 response.raise_for_status()
 
                 result = response.json()
                 status = result.get("status")
 
-                self.append_value_to_parameter("status", f"Attempt {attempt}: {status}\n")
+                self.append_value_to_parameter(
+                    "status", f"Attempt {attempt}: {status}\n"
+                )
 
                 if status == "Ready":
                     image_url = result.get("result", {}).get("sample")
@@ -200,10 +273,14 @@ class TextToImage(ControlNode):
                     continue
 
                 else:
-                    raise ValueError(f"Generation failed with status '{status}': {result}")
+                    raise ValueError(
+                        f"Generation failed with status '{status}': {result}"
+                    )
 
             except requests.RequestException as e:
-                self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
+                self.append_value_to_parameter(
+                    "status", f"Request error on attempt {attempt}: {str(e)}\n"
+                )
                 if attempt >= max_attempts:
                     raise
 
@@ -218,22 +295,28 @@ class TextToImage(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to download image from URL: {str(e)}")
 
-    def _create_image_artifact(self, image_bytes: bytes, output_format: str) -> ImageUrlArtifact:
+    def _create_image_artifact(
+        self, image_bytes: bytes, output_format: str
+    ) -> ImageUrlArtifact:
         """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
         try:
             # Generate unique filename with timestamp and hash
             import hashlib
+
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-            content_hash = hashlib.md5(image_bytes).hexdigest()[:8]  # Short hash of content
-            filename = f"text_to_image_{timestamp}_{content_hash}.{output_format.lower()}"
-            
-            # Save to managed file location and get URL
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
-            
-            return ImageUrlArtifact(
-                value=static_url,
-                name=f"text_to_image_{timestamp}"
+            content_hash = hashlib.md5(image_bytes).hexdigest()[
+                :8
+            ]  # Short hash of content
+            filename = (
+                f"text_to_image_{timestamp}_{content_hash}.{output_format.lower()}"
             )
+
+            # Save to managed file location and get URL
+            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
+                image_bytes, filename
+            )
+
+            return ImageUrlArtifact(value=static_url, name=f"text_to_image_{timestamp}")
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
@@ -244,7 +327,11 @@ class TextToImage(ControlNode):
         # Check for API key
         api_key = self.get_config_value(service=SERVICE, value=API_KEY_ENV_VAR)
         if not api_key:
-            errors.append(ValueError(f"BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."))
+            errors.append(
+                ValueError(
+                    f"BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
+                )
+            )
 
         # Check for prompt
         prompt = self.get_parameter_value("prompt")
@@ -266,12 +353,22 @@ class TextToImage(ControlNode):
 
             # Prepare request payload
             output_format = self.get_parameter_value("output_format")
+
+            # Extract width and height from image_size
+            image_size = self.get_parameter_value("image_size")
+            try:
+                width, height = map(int, image_size.split('x'))
+            except ValueError:
+                raise ValueError("Invalid image size format. Expected format 'widthxheight'.")
+
+            # Update payload to include width and height instead of aspect_ratio
             payload = {
                 "prompt": self.get_parameter_value("prompt").strip(),
-                "aspect_ratio": self.get_parameter_value("aspect_ratio"),
+                "width": width,
+                "height": height,
                 "raw": self.get_parameter_value("raw"),
                 "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
-                "output_format": output_format
+                "output_format": output_format,
             }
 
             # Add seed if provided
@@ -283,10 +380,14 @@ class TextToImage(ControlNode):
 
             # Create request
             request_id = self._create_request(api_key, payload)
-            self.append_value_to_parameter("status", f"Request created with ID: {request_id}\n")
+            self.append_value_to_parameter(
+                "status", f"Request created with ID: {request_id}\n"
+            )
 
             # Poll for result
-            self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
+            self.append_value_to_parameter(
+                "status", "Waiting for generation to complete...\n"
+            )
             image_url = self._poll_for_result(api_key, request_id)
 
             # Download image immediately to prevent expiration issues
@@ -295,13 +396,30 @@ class TextToImage(ControlNode):
 
             # Create image artifact with proper parameters
             image_artifact = self._create_image_artifact(image_bytes, output_format)
-            
+
             # Set output
             self.parameter_output_values["image"] = image_artifact
 
-            self.append_value_to_parameter("status", f"✅ Generation completed successfully!\nImage URL: {image_url}\n")
+            self.append_value_to_parameter(
+                "status",
+                f"✅ Generation completed successfully!\nImage URL: {image_url}\n",
+            )
 
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
-            raise 
+            raise
+
+    def after_value_set(self, parameter: Parameter, value: Any, modified_parameters_set: set[str]) -> None:
+        # Check if the updated parameter is aspect_ratio or max_size
+        if parameter.name in {"aspect_ratio", "max_size"}:
+            # Get current values of aspect_ratio and max_size
+            aspect_ratio = self.get_parameter_value("aspect_ratio")
+            max_size = self.get_parameter_value("max_size")
+
+            # Calculate the image size
+            image_size = self._calculate_image_size(max_size, aspect_ratio)
+
+            # Set the image_size parameter
+            self.set_parameter_value("image_size", image_size)
+            self.publish_update_to_parameter("image_size", image_size)
