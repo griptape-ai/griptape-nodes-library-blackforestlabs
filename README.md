@@ -18,7 +18,7 @@ This library provides Griptape Nodes for interacting with Black Forest Labs' FLU
 
 ```bash
 # Navigate to your workspace directory
-cd $(gtn config | grep workspace_directory | cut -d'"' -f4)
+cd $(gtn config show | grep workspace_directory | cut -d'"' -f4)
 
 # Clone the repository
 git clone https://github.com/griptape-ai/griptape-nodes-library-blackforestlabs.git
