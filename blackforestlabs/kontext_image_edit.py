@@ -94,8 +94,8 @@ class KontextImageEdit(ControlNode):
                 tooltip="Moderation level. 0 = most strict, 6 = least strict",
                 type=ParameterTypeBuiltin.INT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=6,
-                traits={Options(choices=["0", "1", "2", "3", "4", "5", "6"])},
+                default_value=2,
+                traits={Options(choices=[0, 1, 2, 3, 4, 5, 6])},
                 ui_options={"display_name": "Safety Tolerance"}
             )
         )
@@ -162,8 +162,8 @@ class KontextImageEdit(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to convert image to base64: {str(e)}")
 
-    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
-        """Create an editing request and return the request ID."""
+    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> tuple[str, str]:
+        """Create an editing request and return the request ID and polling URL."""
         headers = {
             "accept": "application/json",
             "x-key": api_key,
@@ -173,65 +173,127 @@ class KontextImageEdit(ControlNode):
         # Get selected model for API endpoint
         model = self.get_parameter_value("model")
 
+        # Debug: Log the request details (without sensitive data)
+        debug_payload = payload.copy()
+        if "input_image" in debug_payload:
+            debug_payload["input_image"] = f"<base64_image_{len(payload['input_image'])}_chars>"
+        
+        self.append_value_to_parameter("status", f"DEBUG - API Request:\nModel: {model}\nPayload keys: {list(payload.keys())}\nPayload (redacted): {debug_payload}\n")
+
         response = requests.post(
             f"https://api.us1.bfl.ai/v1/{model}",
             headers=headers,
             json=payload,
             timeout=30
         )
+        
+        # Debug: Log response status and content
+        self.append_value_to_parameter("status", f"DEBUG - Request Response Status: {response.status_code}\n")
+        
         response.raise_for_status()
 
         result = response.json()
+        self.append_value_to_parameter("status", f"DEBUG - Request Response: {result}\n")
+        
         if "id" not in result:
             raise ValueError(f"Unexpected response format: {result}")
 
-        return result["id"]
+        request_id = result["id"]
+        polling_url = result.get("polling_url")  # Get polling URL if provided
+        
+        return request_id, polling_url
 
-    def _poll_for_result(self, api_key: str, request_id: str) -> str:
+    def _poll_for_result(self, api_key: str, request_id: str, polling_url: Optional[str] = None) -> str:
         """Poll for the editing result and return the image URL."""
         headers = {
             "accept": "application/json",
             "x-key": api_key
         }
 
-        max_attempts = 120  # 3 minutes with 1.5s intervals
+        # Use provided polling URL or construct default one
+        url = polling_url if polling_url else f"https://api.us1.bfl.ai/v1/get_result?id={request_id}"
+        self.append_value_to_parameter("status", f"Polling URL: {url}\n")
+
+        max_attempts = 300  # Increased to 7.5 minutes with 1.5s intervals
         attempt = 0
+        pending_count = 0  # Track how long we've been stuck in Pending
+        last_status = None
 
         while attempt < max_attempts:
             time.sleep(1.5)
             attempt += 1
 
             try:
-                response = requests.get(
-                    f"https://api.us1.bfl.ai/v1/get_result?id={request_id}",
-                    headers=headers,
-                    timeout=30
-                )
+                response = requests.get(url, headers=headers, timeout=30)
                 response.raise_for_status()
 
                 result = response.json()
                 status = result.get("status")
+                last_status = status
 
-                self.append_value_to_parameter("status", f"Attempt {attempt}: {status}\n")
+                # Track pending status
+                if status == "Pending":
+                    pending_count += 1
+                else:
+                    pending_count = 0
+
+                # Comprehensive debugging - log full response every 10 attempts
+                if attempt % 10 == 0 or attempt <= 5:
+                    self.append_value_to_parameter("status", f"DEBUG - Full API response at attempt {attempt}: {result}\n")
+                
+                # Log detailed status for debugging
+                self.append_value_to_parameter("status", f"Attempt {attempt}/{max_attempts}: {status}")
+                if "result" in result and result.get("result") is not None:
+                    self.append_value_to_parameter("status", f" - Result keys: {list(result.get('result', {}).keys())}")
+                self.append_value_to_parameter("status", "\n")
+
+                # Check if we've been stuck in Pending for too long
+                if pending_count > 60:  # 1.5 minutes of pending
+                    self.append_value_to_parameter("status", f"⚠️ Request has been stuck in 'Pending' status for {pending_count} attempts (1.5+ minutes).\n")
+                    self.append_value_to_parameter("status", "This might indicate:\n- API service overload\n- Content safety filters blocking the request\n- Invalid request parameters\n")
+                    self.append_value_to_parameter("status", "💡 Try: Different prompt, higher safety_tolerance, or check BFL API status\n")
+                    
+                    # Try to get more details about why it's stuck
+                    if "details" in result and result.get("details"):
+                        self.append_value_to_parameter("status", f"API Details: {result.get('details')}\n")
 
                 if status == "Ready":
                     image_url = result.get("result", {}).get("sample")
                     if not image_url:
-                        raise ValueError(f"No image URL in result: {result}")
+                        # Try alternative result field names
+                        alt_url = result.get("result", {}).get("url") or result.get("result", {}).get("image_url")
+                        if alt_url:
+                            image_url = alt_url
+                        else:
+                            self.append_value_to_parameter("status", f"Debug - Full API response: {result}\n")
+                            raise ValueError(f"No image URL found in result. Available keys: {list(result.get('result', {}).keys())}")
                     return image_url
 
-                elif status in ["Processing", "Queued", "Pending"]:
+                elif status in ["Processing", "Queued", "Pending", "Task-queued", "Task-processing"]:
+                    # Continue polling for these valid in-progress statuses
                     continue
 
+                elif status == "Error" or status == "Failed":
+                    error_details = result.get("result", {}).get("error", "Unknown error")
+                    self.append_value_to_parameter("status", f"API Error Details: {result}\n")
+                    raise ValueError(f"Editing failed with status '{status}': {error_details}")
+
                 else:
-                    raise ValueError(f"Editing failed with status '{status}': {result}")
+                    # Log unknown status for debugging but continue polling
+                    self.append_value_to_parameter("status", f"Unknown status '{status}', continuing to poll. Full response: {result}\n")
+                    continue
 
             except requests.RequestException as e:
                 self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
                 if attempt >= max_attempts:
                     raise
+                continue
 
-        raise TimeoutError(f"Editing timed out after {max_attempts} attempts")
+        # Provide more specific timeout message
+        if pending_count > 50:
+            raise TimeoutError(f"Request stuck in 'Pending' status for {pending_count} attempts. This usually indicates API service issues or content safety filters. Try adjusting safety_tolerance or simplifying the prompt.")
+        else:
+            raise TimeoutError(f"Editing timed out after {max_attempts} attempts (7.5 minutes). Last status: {last_status}")
 
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""
@@ -300,8 +362,12 @@ class KontextImageEdit(ControlNode):
 
             # Prepare request payload
             output_format = self.get_parameter_value("output_format")
+            prompt = self.get_parameter_value("prompt")
+            if not prompt:
+                raise ValueError("Prompt is required and cannot be empty")
+            
             payload = {
-                "prompt": self.get_parameter_value("prompt").strip(),
+                "prompt": prompt.strip(),
                 "input_image": input_image_base64,
                 "aspect_ratio": self.get_parameter_value("aspect_ratio"),
                 "prompt_upsampling": self.get_parameter_value("prompt_upsampling"),
@@ -311,18 +377,18 @@ class KontextImageEdit(ControlNode):
 
             # Add seed if provided
             seed = self.get_parameter_value("seed")
-            if seed is not None:
+            if seed is not None and seed != 0:  # Don't send seed=0
                 payload["seed"] = int(seed)
 
             self.append_value_to_parameter("status", "Creating editing request...\n")
 
             # Create request
-            request_id = self._create_request(api_key, payload)
+            request_id, polling_url = self._create_request(api_key, payload)
             self.append_value_to_parameter("status", f"Request created with ID: {request_id}\n")
 
             # Poll for result
             self.append_value_to_parameter("status", "Waiting for editing to complete...\n")
-            image_url = self._poll_for_result(api_key, request_id)
+            image_url = self._poll_for_result(api_key, request_id, polling_url)
 
             # Download image immediately to prevent expiration issues
             self.append_value_to_parameter("status", "Downloading edited image...\n")
