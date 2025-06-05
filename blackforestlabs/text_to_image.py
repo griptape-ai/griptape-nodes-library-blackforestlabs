@@ -95,9 +95,7 @@ class TextToImage(ControlNode):
                 allowed_modes={ParameterMode.OUTPUT, ParameterMode.PROPERTY},
                 traits={Slider(min_val=256, max_val=1440)},
                 default_value=1024,
-                ui_options={"display_name": "Max Size",
-                            "step": 32
-                            },
+                ui_options={"display_name": "Max Size", "step": 32},
             )
         )
 
@@ -180,9 +178,11 @@ class TextToImage(ControlNode):
     def _calculate_image_size(self, max_size: int, aspect_ratio: str) -> str:
         # Parse the aspect ratio
         try:
-            width_ratio, height_ratio = map(int, aspect_ratio.split(':'))
+            width_ratio, height_ratio = map(int, aspect_ratio.split(":"))
         except ValueError:
-            raise ValueError("Invalid aspect ratio format. Expected format 'width:height'.")
+            raise ValueError(
+                "Invalid aspect ratio format. Expected format 'width:height'."
+            )
 
         # Ensure max_size is an integer
         if not isinstance(max_size, int):
@@ -324,26 +324,33 @@ class TextToImage(ControlNode):
         """Validate node configuration before execution."""
         errors = []
 
+        # Check for prompt
+        prompt = self.get_parameter_value("prompt")
+        if not prompt:
+            errors.append(
+                ValueError(f"{self.name}: Prompt is required and cannot be empty")
+            )
+
         # Check for API key
         api_key = self.get_config_value(service=SERVICE, value=API_KEY_ENV_VAR)
         if not api_key:
             errors.append(
                 ValueError(
-                    f"BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
+                    f"{self.name}: BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
                 )
             )
-
-        # Check for prompt
-        prompt = self.get_parameter_value("prompt")
-        if not prompt or not prompt.strip():
-            errors.append(ValueError("Prompt is required and cannot be empty"))
 
         # Validate seed if provided
         seed = self.get_parameter_value("seed")
         if seed is not None and not isinstance(seed, int):
-            errors.append(ValueError("Seed must be an integer"))
+            errors.append(ValueError(f"{self.name}: Seed must be an integer"))
+
+        print("validate_before_workflow_run returning: ", errors)
 
         return errors if errors else None
+
+    def validate_before_workflow_run(self) -> list[Exception] | None:
+        return self.validate_before_node_run()
 
     def process(self) -> None:
         """Generate image using FLUX API."""
@@ -357,9 +364,11 @@ class TextToImage(ControlNode):
             # Extract width and height from image_size
             image_size = self.get_parameter_value("image_size")
             try:
-                width, height = map(int, image_size.split('x'))
+                width, height = map(int, image_size.split("x"))
             except ValueError:
-                raise ValueError("Invalid image size format. Expected format 'widthxheight'.")
+                raise ValueError(
+                    "Invalid image size format. Expected format 'widthxheight'."
+                )
 
             # Update payload to include width and height instead of aspect_ratio
             payload = {
@@ -410,7 +419,9 @@ class TextToImage(ControlNode):
             self.append_value_to_parameter("status", error_msg)
             raise
 
-    def after_value_set(self, parameter: Parameter, value: Any, modified_parameters_set: set[str]) -> None:
+    def after_value_set(
+        self, parameter: Parameter, value: Any, modified_parameters_set: set[str]
+    ) -> None:
         # Check if the updated parameter is aspect_ratio or max_size
         if parameter.name in {"aspect_ratio", "max_size"}:
             # Get current values of aspect_ratio and max_size
