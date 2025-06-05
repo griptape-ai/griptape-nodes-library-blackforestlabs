@@ -239,19 +239,22 @@ class KontextTextToImage(ControlNode):
         # Check for API key
         api_key = self.get_config_value(service=SERVICE, value=API_KEY_ENV_VAR)
         if not api_key:
-            errors.append(ValueError(f"BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."))
+            errors.append(ValueError(f"{self.name}: BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."))
 
         # Check for prompt
         prompt = self.get_parameter_value("prompt")
         if not prompt or not prompt.strip():
-            errors.append(ValueError("Prompt is required and cannot be empty"))
+            errors.append(ValueError(f"{self.name}: Prompt is required and cannot be empty"))
 
         # Validate seed if provided
         seed = self.get_parameter_value("seed")
         if seed is not None and not isinstance(seed, int):
-            errors.append(ValueError("Seed must be an integer"))
+            errors.append(ValueError(f"{self.name}: Seed must be an integer"))
 
         return errors if errors else None
+
+    def validate_before_workflow_run(self) -> list[Exception] | None:
+        return self.validate_before_node_run()
 
     def process(self) -> None:
         """Generate image using FLUX.1 Kontext API."""
