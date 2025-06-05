@@ -287,8 +287,8 @@ class KontextTextToImage(ControlNode):
 
         return errors if errors else None
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        return self.validate_before_node_run()
+    #    def validate_before_workflow_run(self) -> list[Exception] | None:
+    #        return self.validate_before_node_run()
 
     def process(self) -> None:
         """Generate image using FLUX.1 Kontext API."""

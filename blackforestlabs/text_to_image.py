@@ -15,9 +15,6 @@ from griptape_nodes.exe_types.node_types import ControlNode
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.slider import Slider
-from griptape_nodes.retained_mode.events.connection_events import (
-    ListConnectionsForNodeRequest,
-)
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
@@ -352,8 +349,8 @@ class TextToImage(ControlNode):
 
         return errors if errors else None
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        return self.validate_before_node_run()
+    #    def validate_before_workflow_run(self) -> list[Exception] | None:
+    #        return self.validate_before_node_run()
 
     def process(self) -> None:
         """Generate image using FLUX API."""
