@@ -6,7 +6,11 @@ from typing import Any, Dict, Optional
 import requests
 from PIL import Image
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
-from griptape_nodes.exe_types.core_types import Parameter, ParameterMode, ParameterTypeBuiltin
+from griptape_nodes.exe_types.core_types import (
+    Parameter,
+    ParameterMode,
+    ParameterTypeBuiltin,
+)
 from griptape_nodes.exe_types.node_types import ControlNode
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
@@ -30,7 +34,7 @@ class KontextTextToImage(ControlNode):
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="flux-kontext-pro",
                 traits={Options(choices=["flux-kontext-pro", "flux-kontext-max"])},
-                ui_options={"display_name": "Model"}
+                ui_options={"display_name": "Model"},
             )
         )
 
@@ -40,7 +44,10 @@ class KontextTextToImage(ControlNode):
                 tooltip="Text description of the desired image",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                ui_options={"multiline": True, "placeholder_text": "Describe the image you want to generate..."}
+                ui_options={
+                    "multiline": True,
+                    "placeholder_text": "Describe the image you want to generate...",
+                },
             )
         )
 
@@ -51,10 +58,22 @@ class KontextTextToImage(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="1:1",
-                traits={Options(choices=[
-                    "3:7", "9:16", "2:3", "3:4", "1:1", "4:3", "3:2", "16:9", "7:3"
-                ])},
-                ui_options={"display_name": "Aspect Ratio"}
+                traits={
+                    Options(
+                        choices=[
+                            "3:7",
+                            "9:16",
+                            "2:3",
+                            "3:4",
+                            "1:1",
+                            "4:3",
+                            "3:2",
+                            "16:9",
+                            "7:3",
+                        ]
+                    )
+                },
+                ui_options={"display_name": "Aspect Ratio"},
             )
         )
 
@@ -64,7 +83,7 @@ class KontextTextToImage(ControlNode):
                 tooltip="Seed for reproducibility. Leave empty for random generation.",
                 type=ParameterTypeBuiltin.INT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                ui_options={"placeholder_text": "Enter seed (optional)"}
+                ui_options={"placeholder_text": "Enter seed (optional)"},
             )
         )
 
@@ -75,7 +94,7 @@ class KontextTextToImage(ControlNode):
                 type=ParameterTypeBuiltin.BOOL.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=False,
-                ui_options={"display_name": "Prompt Upsampling"}
+                ui_options={"display_name": "Prompt Upsampling"},
             )
         )
 
@@ -87,7 +106,7 @@ class KontextTextToImage(ControlNode):
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=2,
                 traits={Options(choices=["0", "1", "2"])},
-                ui_options={"display_name": "Safety Tolerance"}
+                ui_options={"display_name": "Safety Tolerance"},
             )
         )
 
@@ -99,7 +118,7 @@ class KontextTextToImage(ControlNode):
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="jpeg",
                 traits={Options(choices=["jpeg", "png"])},
-                ui_options={"display_name": "Output Format"}
+                ui_options={"display_name": "Output Format"},
             )
         )
 
@@ -109,7 +128,7 @@ class KontextTextToImage(ControlNode):
                 name="image",
                 tooltip="Generated image with cached data",
                 output_type="ImageUrlArtifact",
-                allowed_modes={ParameterMode.OUTPUT}
+                allowed_modes={ParameterMode.OUTPUT},
             )
         )
 
@@ -119,7 +138,7 @@ class KontextTextToImage(ControlNode):
                 tooltip="Generation status and progress",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.OUTPUT},
-                ui_options={"multiline": True, "pulse_on_run": True}
+                ui_options={"multiline": True, "pulse_on_run": True},
             )
         )
 
@@ -138,17 +157,17 @@ class KontextTextToImage(ControlNode):
         headers = {
             "accept": "application/json",
             "x-key": api_key,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
 
         # Get selected model for API endpoint
         model = self.get_parameter_value("model")
-        
+
         response = requests.post(
             f"https://api.us1.bfl.ai/v1/{model}",
             headers=headers,
             json=payload,
-            timeout=30
+            timeout=30,
         )
         response.raise_for_status()
 
@@ -160,10 +179,7 @@ class KontextTextToImage(ControlNode):
 
     def _poll_for_result(self, api_key: str, request_id: str) -> str:
         """Poll for the generation result and return the image URL."""
-        headers = {
-            "accept": "application/json",
-            "x-key": api_key
-        }
+        headers = {"accept": "application/json", "x-key": api_key}
 
         max_attempts = 120  # 3 minutes with 1.5s intervals
         attempt = 0
@@ -176,14 +192,16 @@ class KontextTextToImage(ControlNode):
                 response = requests.get(
                     f"https://api.us1.bfl.ai/v1/get_result?id={request_id}",
                     headers=headers,
-                    timeout=30
+                    timeout=30,
                 )
                 response.raise_for_status()
 
                 result = response.json()
                 status = result.get("status")
 
-                self.append_value_to_parameter("status", f"Attempt {attempt}: {status}\n")
+                self.append_value_to_parameter(
+                    "status", f"Attempt {attempt}: {status}\n"
+                )
 
                 if status == "Ready":
                     image_url = result.get("result", {}).get("sample")
@@ -195,10 +213,14 @@ class KontextTextToImage(ControlNode):
                     continue
 
                 else:
-                    raise ValueError(f"Generation failed with status '{status}': {result}")
+                    raise ValueError(
+                        f"Generation failed with status '{status}': {result}"
+                    )
 
             except requests.RequestException as e:
-                self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
+                self.append_value_to_parameter(
+                    "status", f"Request error on attempt {attempt}: {str(e)}\n"
+                )
                 if attempt >= max_attempts:
                     raise
 
@@ -213,21 +235,27 @@ class KontextTextToImage(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to download image from URL: {str(e)}")
 
-    def _create_image_artifact(self, image_bytes: bytes, output_format: str) -> ImageUrlArtifact:
+    def _create_image_artifact(
+        self, image_bytes: bytes, output_format: str
+    ) -> ImageUrlArtifact:
         """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
         try:
             # Generate unique filename with timestamp and hash
             import hashlib
+
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-            content_hash = hashlib.md5(image_bytes).hexdigest()[:8]  # Short hash of content
+            content_hash = hashlib.md5(image_bytes).hexdigest()[
+                :8
+            ]  # Short hash of content
             filename = f"kontext_text_to_image_{timestamp}_{content_hash}.{output_format.lower()}"
-            
+
             # Save to managed file location and get URL
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
-            
+            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
+                image_bytes, filename
+            )
+
             return ImageUrlArtifact(
-                value=static_url,
-                name=f"kontext_text_to_image_{timestamp}"
+                value=static_url, name=f"kontext_text_to_image_{timestamp}"
             )
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
@@ -239,12 +267,18 @@ class KontextTextToImage(ControlNode):
         # Check for API key
         api_key = self.get_config_value(service=SERVICE, value=API_KEY_ENV_VAR)
         if not api_key:
-            errors.append(ValueError(f"{self.name}: BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."))
+            errors.append(
+                ValueError(
+                    f"{self.name}: BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
+                )
+            )
 
         # Check for prompt
         prompt = self.get_parameter_value("prompt")
-        if not prompt or not prompt.strip():
-            errors.append(ValueError(f"{self.name}: Prompt is required and cannot be empty"))
+        if not prompt:
+            errors.append(
+                ValueError(f"{self.name}: Prompt is required and cannot be empty")
+            )
 
         # Validate seed if provided
         seed = self.get_parameter_value("seed")
@@ -253,8 +287,8 @@ class KontextTextToImage(ControlNode):
 
         return errors if errors else None
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        return self.validate_before_node_run()
+    #    def validate_before_workflow_run(self) -> list[Exception] | None:
+    #        return self.validate_before_node_run()
 
     def process(self) -> None:
         """Generate image using FLUX.1 Kontext API."""
@@ -269,7 +303,7 @@ class KontextTextToImage(ControlNode):
                 "aspect_ratio": self.get_parameter_value("aspect_ratio"),
                 "prompt_upsampling": self.get_parameter_value("prompt_upsampling"),
                 "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
-                "output_format": output_format
+                "output_format": output_format,
             }
 
             # Add seed if provided
@@ -281,10 +315,14 @@ class KontextTextToImage(ControlNode):
 
             # Create request
             request_id = self._create_request(api_key, payload)
-            self.append_value_to_parameter("status", f"Request created with ID: {request_id}\n")
+            self.append_value_to_parameter(
+                "status", f"Request created with ID: {request_id}\n"
+            )
 
             # Poll for result
-            self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
+            self.append_value_to_parameter(
+                "status", "Waiting for generation to complete...\n"
+            )
             image_url = self._poll_for_result(api_key, request_id)
 
             # Download image immediately to prevent expiration issues
@@ -293,13 +331,16 @@ class KontextTextToImage(ControlNode):
 
             # Create image artifact with proper parameters
             image_artifact = self._create_image_artifact(image_bytes, output_format)
-            
+
             # Set output
             self.parameter_output_values["image"] = image_artifact
 
-            self.append_value_to_parameter("status", f"✅ Generation completed successfully!\nImage URL: {image_url}\n")
+            self.append_value_to_parameter(
+                "status",
+                f"✅ Generation completed successfully!\nImage URL: {image_url}\n",
+            )
 
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
-            raise 
+            raise

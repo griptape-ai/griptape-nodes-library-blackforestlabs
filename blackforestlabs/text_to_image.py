@@ -345,12 +345,10 @@ class TextToImage(ControlNode):
         if seed is not None and not isinstance(seed, int):
             errors.append(ValueError(f"{self.name}: Seed must be an integer"))
 
-        print("validate_before_workflow_run returning: ", errors)
-
         return errors if errors else None
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        return self.validate_before_node_run()
+    #    def validate_before_workflow_run(self) -> list[Exception] | None:
+    #        return self.validate_before_node_run()
 
     def process(self) -> None:
         """Generate image using FLUX API."""
