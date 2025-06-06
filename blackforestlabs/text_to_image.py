@@ -11,7 +11,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode
+from griptape_nodes.exe_types.node_types import ControlNode, BaseNode
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.slider import Slider
@@ -25,6 +25,9 @@ class TextToImage(ControlNode):
 
     def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
+
+        # State to track incoming connections
+        self.incoming_connections = {}
 
         # Input parameters
         self.add_parameter(
@@ -60,6 +63,9 @@ class TextToImage(ControlNode):
                 },
             )
         )
+
+        # Initialize incoming connection state for prompt parameter
+        self.incoming_connections["prompt"] = False
 
         self.add_parameter(
             Parameter(
@@ -320,15 +326,23 @@ class TextToImage(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
+    def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter, modified_parameters_set: set[str]) -> None:
+        # Mark the parameter as having an incoming connection
+        self.incoming_connections[target_parameter.name] = True
+
+    def after_incoming_connection_removed(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter, modified_parameters_set: set[str]) -> None:
+        # Mark the parameter as not having an incoming connection
+        self.incoming_connections[target_parameter.name] = False
+
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
         errors = []
 
         # Check for prompt
         prompt = self.get_parameter_value("prompt")
-        if not prompt:
+        if not (prompt or self.incoming_connections.get("prompt", False)):
             errors.append(
-                ValueError(f"{self.name}: Prompt is required and cannot be empty")
+                ValueError(f"{self.name}: Provide a prompt or make a connection to the prompt parameter in this node.")
             )
 
         # Check for API key
@@ -347,8 +361,8 @@ class TextToImage(ControlNode):
 
         return errors if errors else None
 
-    #    def validate_before_workflow_run(self) -> list[Exception] | None:
-    #        return self.validate_before_node_run()
+    def validate_before_workflow_run(self) -> list[Exception] | None:
+        return self.validate_before_node_run()
 
     def process(self) -> None:
         """Generate image using FLUX API."""
@@ -368,9 +382,13 @@ class TextToImage(ControlNode):
                     "Invalid image size format. Expected format 'widthxheight'."
                 )
 
+            prompt = self.get_parameter_value("prompt")
+            if not prompt:
+                raise ValueError("Prompt is required and cannot be empty")
+
             # Update payload to include width and height instead of aspect_ratio
             payload = {
-                "prompt": self.get_parameter_value("prompt").strip(),
+                "prompt": prompt.strip(),
                 "width": width,
                 "height": height,
                 "raw": self.get_parameter_value("raw"),
