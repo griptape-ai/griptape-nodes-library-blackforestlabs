@@ -342,6 +342,19 @@ class KontextImageEdit(ControlNode):
                     # Continue polling for these valid in-progress statuses
                     continue
 
+                elif status == "Request Moderated":
+                    moderation_reasons = result.get("details", {}).get("Moderation Reasons", ["Unknown"])
+                    self.append_value_to_parameter(
+                        "status", f"Request was blocked by content moderation: {', '.join(moderation_reasons)}\n"
+                    )
+                    self.append_value_to_parameter(
+                        "status", "💡 Try: Increase safety_tolerance, use different wording, or avoid restricted content (police, violence, etc.)\n"
+                    )
+                    raise ValueError(
+                        f"Request blocked by content moderation: {', '.join(moderation_reasons)}. "
+                        f"Try increasing safety_tolerance or modifying your prompt to avoid restricted content."
+                    )
+
                 elif status == "Error" or status == "Failed":
                     error_details = result.get("result", {}).get(
                         "error", "Unknown error"
