@@ -1,0 +1,3 @@
+[env]
+_.python.venv = { path = ".venv", create = true } # Automatically create a virtual environment
+_.file = '.env'                                   # Automatically load .env file (direnv)
