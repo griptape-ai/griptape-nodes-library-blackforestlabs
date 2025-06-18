@@ -117,11 +117,11 @@ class KontextImageEdit(ControlNode):
         self.add_parameter(
             Parameter(
                 name="safety_tolerance",
-                tooltip="Moderation level. 0 = most strict, 6 = least strict",
+                tooltip="Moderation level. 0 = most strict, 2 = balanced",
                 type=ParameterTypeBuiltin.INT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=2,
-                traits={Options(choices=[0, 1, 2, 3, 4, 5, 6])},
+                traits={Options(choices=[0, 1, 2])},
                 ui_options={"display_name": "Safety Tolerance"},
             )
         )
