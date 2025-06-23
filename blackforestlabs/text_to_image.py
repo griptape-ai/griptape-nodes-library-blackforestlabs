@@ -326,11 +326,11 @@ class TextToImage(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
-    def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter, modified_parameters_set: set[str]) -> None:
+    def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
         # Mark the parameter as having an incoming connection
         self.incoming_connections[target_parameter.name] = True
 
-    def after_incoming_connection_removed(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter, modified_parameters_set: set[str]) -> None:
+    def after_incoming_connection_removed(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
         # Mark the parameter as not having an incoming connection
         self.incoming_connections[target_parameter.name] = False
 
@@ -436,7 +436,7 @@ class TextToImage(ControlNode):
             raise
 
     def after_value_set(
-        self, parameter: Parameter, value: Any, modified_parameters_set: set[str]
+        self, parameter: Parameter, value: Any
     ) -> None:
         # Check if the updated parameter is aspect_ratio or max_size
         if parameter.name in {"aspect_ratio", "max_size"}:
