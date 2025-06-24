@@ -4,8 +4,8 @@
     "metadata": {
         "author": "Griptape",
         "description": "Griptape Nodes for Black Forest Labs APIs including FLUX.1 Kontext and FLUX text-to-image generation and image editing",
-        "library_version": "0.1.0",
-        "engine_version": "0.1.0",
+        "library_version": "0.1.1",
+        "engine_version": "0.39.0",
         "tags": [
             "Griptape",
             "AI",

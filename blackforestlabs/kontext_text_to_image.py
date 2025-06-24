@@ -187,11 +187,18 @@ class KontextTextToImage(ControlNode):
         """Poll for the generation result and return the image URL."""
         headers = {"accept": "application/json", "x-key": api_key}
 
-        max_attempts = 120  # 3 minutes with 1.5s intervals
+        max_attempts = 120  # 3 minutes with exponential backoff
         attempt = 0
+        consecutive_500_errors = 0
+        base_sleep = 1.5
 
         while attempt < max_attempts:
-            time.sleep(1.5)
+            # Exponential backoff with jitter
+            import random
+            sleep_time = min(base_sleep * (2 ** min(attempt // 10, 4)), 10)  # Cap at 10s
+            sleep_time += random.uniform(0, 0.5)  # Add jitter
+            time.sleep(sleep_time)
+            
             attempt += 1
 
             try:
@@ -200,8 +207,36 @@ class KontextTextToImage(ControlNode):
                     headers=headers,
                     timeout=30,
                 )
-                response.raise_for_status()
+                
+                # Handle different status codes differently
+                if response.status_code == 500:
+                    consecutive_500_errors += 1
+                    self.append_value_to_parameter(
+                        "status", f"Attempt {attempt}: Server error (500) - #{consecutive_500_errors} consecutive\n"
+                    )
+                    
+                    # If we get too many consecutive 500 errors, it's likely a persistent API issue
+                    if consecutive_500_errors >= 10:
+                        raise ValueError(
+                            f"API appears to have persistent server issues (10+ consecutive 500 errors). "
+                            f"This may be a problem with the {self.get_parameter_value('model')} model endpoint. "
+                            f"Try using flux-kontext-pro instead, or wait and retry later."
+                        )
+                    continue
+                    
+                elif response.status_code == 429:
+                    self.append_value_to_parameter(
+                        "status", f"Attempt {attempt}: Rate limited, waiting longer...\n"
+                    )
+                    time.sleep(5)  # Additional wait for rate limiting
+                    continue
+                    
+                elif response.status_code != 200:
+                    response.raise_for_status()
 
+                # Reset consecutive error counter on successful response
+                consecutive_500_errors = 0
+                
                 result = response.json()
                 status = result.get("status")
 
@@ -224,9 +259,11 @@ class KontextTextToImage(ControlNode):
                     )
 
             except requests.RequestException as e:
-                self.append_value_to_parameter(
-                    "status", f"Request error on attempt {attempt}: {str(e)}\n"
-                )
+                # Only log non-500 errors here since we handle 500s above
+                if not (hasattr(e, 'response') and e.response and e.response.status_code == 500):
+                    self.append_value_to_parameter(
+                        "status", f"Request error on attempt {attempt}: {str(e)}\n"
+                    )
                 if attempt >= max_attempts:
                     raise
 
