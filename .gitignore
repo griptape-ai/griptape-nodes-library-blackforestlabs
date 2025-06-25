@@ -4,3 +4,4 @@ example_nodes_template/__pycache__/
 **/__pycache__/
 *.pyc
 *.pyo
+mise.toml
