@@ -57,7 +57,7 @@ Configure your API key through the Griptape Nodes IDE:
 If you haven't already installed your Griptape Nodes engine, follow the installation steps [HERE](https://github.com/griptape-ai/griptape-nodes).
 After you've completed those and you have your engine up and running: 
 
-1. Copy the path to your `griptape_nodes_library.json` file within this `blackforestlabs` directory. Right click on the file, and `Copy Path` (Not `Copy Relative Path`).
+1. Copy the path to your `griptape_nodes_library.json` file within the `griptape_nodes_library_blackforestlabs` directory. Right click on the file, and `Copy Path` (Not `Copy Relative Path`).
    ![Copy path of the griptape_nodes_library.json](./images/get_json_path.png)
 2. Start up the engine! 
 3. Navigate to settings.
