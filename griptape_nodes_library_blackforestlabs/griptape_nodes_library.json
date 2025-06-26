@@ -1,5 +1,5 @@
 {
-    "name": "Black Forest Labs",
+    "name": "Black Forest Labs Library",
     "library_schema_version": "0.1.0",
     "metadata": {
         "author": "Griptape",
@@ -18,7 +18,7 @@
     },
     "categories": [
         {
-            "BlackForestLabs": {
+            "Image/BlackForestLabs": {
                 "color": "border-purple-500",
                 "title": "Black Forest Labs",
                 "description": "FLUX nodes for image generation and editing",
@@ -31,7 +31,7 @@
             "class_name": "TextToImage",
             "file_path": "text_to_image.py",
             "metadata": {
-                "category": "BlackForestLabs",
+                "category": "Image/BlackForestLabs",
                 "description": "Generate high-quality images from text prompts using FLUX Pro, Dev, and Ultra models",
                 "display_name": "FLUX Text-to-Image"
             }
@@ -40,7 +40,7 @@
             "class_name": "KontextTextToImage",
             "file_path": "kontext_text_to_image.py",
             "metadata": {
-                "category": "BlackForestLabs",
+                "category": "Image/BlackForestLabs",
                 "description": "Generate high-quality images from text prompts using FLUX.1 Kontext",
                 "display_name": "FLUX.1 Kontext Text-to-Image"
             }
@@ -49,7 +49,7 @@
             "class_name": "KontextImageEdit",
             "file_path": "kontext_image_edit.py",
             "metadata": {
-                "category": "BlackForestLabs",
+                "category": "Image/BlackForestLabs",
                 "description": "Edit existing images using FLUX.1 Kontext with text prompts for object modification, text editing, and smart changes",
                 "display_name": "FLUX.1 Kontext Image Edit"
             }
