@@ -17,9 +17,10 @@ This library provides Griptape Nodes for interacting with Black Forest Labs' FLU
 1. Clone this repository into your Griptape Nodes workspace directory:
 
 ```bash
-# Navigate to your workspace directory.
+# Navigate to your workspace directory
 # On Mac or Linux you can use the command below to print your workspace directory
 cd $(gtn config show | grep workspace_directory | cut -d'"' -f4)
+# On Windows, the default workspace directory is a directly named GriptapeNodes in the users windows home directory - usually C:\Users\<username>\GriptapeNodes
 
 # Clone the repository
 git clone https://github.com/griptape-ai/griptape-nodes-library-blackforestlabs.git
