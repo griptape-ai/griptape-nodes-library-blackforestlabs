@@ -20,7 +20,7 @@ This library provides Griptape Nodes for interacting with Black Forest Labs' FLU
 # Navigate to your workspace directory
 # On Mac or Linux you can use the command below to print your workspace directory
 cd $(gtn config show | grep workspace_directory | cut -d'"' -f4)
-# On Windows, the default workspace directory is a directly named GriptapeNodes in your home directory.
+# On Windows, the default workspace directory is a directory named GriptapeNodes in your home directory.
 # Usually this is C:\Users\<username>\GriptapeNodes
 
 # Clone the repository
