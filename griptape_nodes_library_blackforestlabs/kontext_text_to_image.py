@@ -11,7 +11,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, BaseNode
+from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
@@ -303,6 +303,31 @@ class KontextTextToImage(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
+    def _poll_and_process_result(self, api_key: str, request_id: str, output_format: str) -> None:
+        """Poll for result, download image, and set output - called via yield."""
+        try:
+            # Poll for result
+            image_url = self._poll_for_result(api_key, request_id)
+            
+            # Download image immediately to prevent expiration issues
+            self.append_value_to_parameter("status", "Downloading generated image...\n")
+            image_bytes = self._download_image(image_url)
+
+            # Create image artifact with proper parameters
+            image_artifact = self._create_image_artifact(image_bytes, output_format)
+
+            # Set output
+            self.parameter_output_values["image"] = image_artifact
+
+            self.append_value_to_parameter(
+                "status",
+                f"✅ Generation completed successfully!\nImage URL: {image_url}\n",
+            )
+        except Exception as e:
+            error_msg = f"❌ Generation failed: {str(e)}\n"
+            self.append_value_to_parameter("status", error_msg)
+            raise
+
     def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
             # Mark the parameter as having an incoming connection
             self.incoming_connections[target_parameter.name] = True
@@ -341,7 +366,7 @@ class KontextTextToImage(ControlNode):
     def validate_before_workflow_run(self) -> list[Exception] | None:
         return self.validate_before_node_run()
 
-    def process(self) -> None:
+    def process(self) -> AsyncResult:
         """Generate image using FLUX.1 Kontext API."""
         try:
             # Get API key
@@ -370,26 +395,11 @@ class KontextTextToImage(ControlNode):
                 "status", f"Request created with ID: {request_id}\n"
             )
 
-            # Poll for result
+            # Poll for result using async pattern
             self.append_value_to_parameter(
                 "status", "Waiting for generation to complete...\n"
             )
-            image_url = self._poll_for_result(api_key, request_id)
-
-            # Download image immediately to prevent expiration issues
-            self.append_value_to_parameter("status", "Downloading generated image...\n")
-            image_bytes = self._download_image(image_url)
-
-            # Create image artifact with proper parameters
-            image_artifact = self._create_image_artifact(image_bytes, output_format)
-
-            # Set output
-            self.parameter_output_values["image"] = image_artifact
-
-            self.append_value_to_parameter(
-                "status",
-                f"✅ Generation completed successfully!\nImage URL: {image_url}\n",
-            )
+            yield lambda: self._poll_and_process_result(api_key, request_id, output_format)
 
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"

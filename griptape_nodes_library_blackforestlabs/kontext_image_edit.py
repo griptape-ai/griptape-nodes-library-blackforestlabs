@@ -11,7 +11,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, BaseNode
+from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
@@ -65,6 +65,8 @@ class KontextImageEdit(ControlNode):
 
         # Initialize incoming connection state for prompt parameter
         self.incoming_connections["prompt"] = False
+        # Initialize incoming connection state for input_image parameter  
+        self.incoming_connections["input_image"] = False
 
 
         self.add_parameter(
@@ -252,13 +254,13 @@ class KontextImageEdit(ControlNode):
         )
         self.append_value_to_parameter("status", f"Polling URL: {url}\n")
 
-        max_attempts = 300  # Increased to 7.5 minutes with 1.5s intervals
+        max_attempts = 900  # 7.5 minutes with 0.5s intervals (300 * 1.5 / 0.5)
         attempt = 0
         pending_count = 0  # Track how long we've been stuck in Pending
         last_status = None
 
         while attempt < max_attempts:
-            time.sleep(1.5)
+            time.sleep(0.5)  # Shorter sleep to reduce engine blocking while being API-friendly
             attempt += 1
 
             try:
@@ -428,6 +430,31 @@ class KontextImageEdit(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
+    def _poll_and_process_result(self, api_key: str, request_id: str, polling_url: str, output_format: str) -> None:
+        """Poll for result, download image, and set output - called via yield."""
+        try:
+            # Poll for result
+            image_url = self._poll_for_result(api_key, request_id, polling_url)
+            
+            # Download image immediately to prevent expiration issues
+            self.append_value_to_parameter("status", "Downloading edited image...\n")
+            image_bytes = self._download_image(image_url)
+
+            # Create image artifact with proper parameters
+            image_artifact = self._create_image_artifact(image_bytes, output_format)
+
+            # Set output
+            self.parameter_output_values["edited_image"] = image_artifact
+
+            self.append_value_to_parameter(
+                "status",
+                f"✅ Editing completed successfully!\nImage URL: {image_url}\n",
+            )
+        except Exception as e:
+            error_msg = f"❌ Editing failed: {str(e)}\n"
+            self.append_value_to_parameter("status", error_msg)
+            raise
+
     def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
         # Mark the parameter as having an incoming connection
         self.incoming_connections[target_parameter.name] = True
@@ -451,7 +478,7 @@ class KontextImageEdit(ControlNode):
 
         # Check for input image
         input_image = self.get_parameter_value("input_image")
-        if not input_image:
+        if not (input_image or self.incoming_connections.get("input_image", False)):
             errors.append(ValueError(f"{self.name}: Input image is required"))
 
         # Check for prompt
@@ -471,7 +498,7 @@ class KontextImageEdit(ControlNode):
     def validate_before_workflow_run(self) -> list[Exception] | None:
         return self.validate_before_node_run()
 
-    def process(self) -> None:
+    def process(self) -> AsyncResult:
         """Edit image using FLUX.1 Kontext API."""
         try:
             # Get API key
@@ -512,26 +539,11 @@ class KontextImageEdit(ControlNode):
                 "status", f"Request created with ID: {request_id}\n"
             )
 
-            # Poll for result
+            # Poll for result using async pattern
             self.append_value_to_parameter(
                 "status", "Waiting for editing to complete...\n"
             )
-            image_url = self._poll_for_result(api_key, request_id, polling_url)
-
-            # Download image immediately to prevent expiration issues
-            self.append_value_to_parameter("status", "Downloading edited image...\n")
-            image_bytes = self._download_image(image_url)
-
-            # Create image artifact with proper parameters
-            image_artifact = self._create_image_artifact(image_bytes, output_format)
-
-            # Set output
-            self.parameter_output_values["edited_image"] = image_artifact
-
-            self.append_value_to_parameter(
-                "status",
-                f"✅ Editing completed successfully!\nImage URL: {image_url}\n",
-            )
+            yield lambda: self._poll_and_process_result(api_key, request_id, polling_url, output_format)
 
         except Exception as e:
             error_msg = f"❌ Editing failed: {str(e)}\n"

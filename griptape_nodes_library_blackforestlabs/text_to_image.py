@@ -11,7 +11,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, BaseNode
+from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.slider import Slider
@@ -243,54 +243,76 @@ class TextToImage(ControlNode):
 
         return result["id"]
 
-    def _poll_for_result(self, api_key: str, request_id: str) -> str:
-        """Poll for the generation result and return the image URL."""
-        headers = {"accept": "application/json", "x-key": api_key}
+    def _poll_and_process_result(self, api_key: str, request_id: str, output_format: str) -> None:
+        """Poll for the generation result, download image, and set output - called via yield."""
+        try:
+            # Poll for result
+            headers = {"accept": "application/json", "x-key": api_key}
+            max_attempts = 120  # 3 minutes with 1.5s intervals
+            attempt = 0
+            image_url = None
 
-        max_attempts = 120  # 3 minutes with 1.5s intervals
-        attempt = 0
+            while attempt < max_attempts and image_url is None:
+                time.sleep(1.5)
+                attempt += 1
 
-        while attempt < max_attempts:
-            time.sleep(1.5)
-            attempt += 1
+                try:
+                    response = requests.get(
+                        f"https://api.us1.bfl.ai/v1/get_result?id={request_id}",
+                        headers=headers,
+                        timeout=30,
+                    )
+                    response.raise_for_status()
 
-            try:
-                response = requests.get(
-                    f"https://api.us1.bfl.ai/v1/get_result?id={request_id}",
-                    headers=headers,
-                    timeout=30,
-                )
-                response.raise_for_status()
+                    result = response.json()
+                    status = result.get("status")
 
-                result = response.json()
-                status = result.get("status")
-
-                self.append_value_to_parameter(
-                    "status", f"Attempt {attempt}: {status}\n"
-                )
-
-                if status == "Ready":
-                    image_url = result.get("result", {}).get("sample")
-                    if not image_url:
-                        raise ValueError(f"No image URL in result: {result}")
-                    return image_url
-
-                elif status in ["Processing", "Queued", "Pending"]:
-                    continue
-
-                else:
-                    raise ValueError(
-                        f"Generation failed with status '{status}': {result}"
+                    self.append_value_to_parameter(
+                        "status", f"Attempt {attempt}: {status}\n"
                     )
 
-            except requests.RequestException as e:
-                self.append_value_to_parameter(
-                    "status", f"Request error on attempt {attempt}: {str(e)}\n"
-                )
-                if attempt >= max_attempts:
-                    raise
+                    if status == "Ready":
+                        image_url = result.get("result", {}).get("sample")
+                        if not image_url:
+                            raise ValueError(f"No image URL in result: {result}")
+                        break
 
-        raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
+                    elif status in ["Processing", "Queued", "Pending"]:
+                        continue
+
+                    else:
+                        raise ValueError(
+                            f"Generation failed with status '{status}': {result}"
+                        )
+
+                except requests.RequestException as e:
+                    self.append_value_to_parameter(
+                        "status", f"Request error on attempt {attempt}: {str(e)}\n"
+                    )
+                    if attempt >= max_attempts:
+                        raise
+
+            if image_url is None:
+                raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
+
+            # Download image immediately to prevent expiration issues
+            self.append_value_to_parameter("status", "Downloading generated image...\n")
+            image_bytes = self._download_image(image_url)
+
+            # Create image artifact with proper parameters
+            image_artifact = self._create_image_artifact(image_bytes, output_format)
+
+            # Set output
+            self.parameter_output_values["image"] = image_artifact
+
+            self.append_value_to_parameter(
+                "status",
+                f"✅ Generation completed successfully!\nImage URL: {image_url}\n",
+            )
+        except Exception as e:
+            error_msg = f"❌ Generation failed: {str(e)}\n"
+            self.append_value_to_parameter("status", error_msg)
+            raise
 
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""
@@ -364,7 +386,7 @@ class TextToImage(ControlNode):
     def validate_before_workflow_run(self) -> list[Exception] | None:
         return self.validate_before_node_run()
 
-    def process(self) -> None:
+    def process(self) -> AsyncResult:
         """Generate image using FLUX API."""
         try:
             # Get API key
@@ -409,26 +431,11 @@ class TextToImage(ControlNode):
                 "status", f"Request created with ID: {request_id}\n"
             )
 
-            # Poll for result
+            # Poll for result using async pattern
             self.append_value_to_parameter(
                 "status", "Waiting for generation to complete...\n"
             )
-            image_url = self._poll_for_result(api_key, request_id)
-
-            # Download image immediately to prevent expiration issues
-            self.append_value_to_parameter("status", "Downloading generated image...\n")
-            image_bytes = self._download_image(image_url)
-
-            # Create image artifact with proper parameters
-            image_artifact = self._create_image_artifact(image_bytes, output_format)
-
-            # Set output
-            self.parameter_output_values["image"] = image_artifact
-
-            self.append_value_to_parameter(
-                "status",
-                f"✅ Generation completed successfully!\nImage URL: {image_url}\n",
-            )
+            yield lambda: self._poll_and_process_result(api_key, request_id, output_format)
 
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"
