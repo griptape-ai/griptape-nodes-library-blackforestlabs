@@ -248,7 +248,12 @@ class KontextTextToImage(ControlNode):
                     image_url = result.get("result", {}).get("sample")
                     if not image_url:
                         raise ValueError(f"No image URL in result: {result}")
-                    return image_url
+                    
+                    # Extract the actual seed used by the API
+                    api_seed = result.get("result", {}).get("seed")
+                    if api_seed:
+                        self.append_value_to_parameter("status", f"API used seed: {api_seed}\n")
+                    return image_url, api_seed
 
                 elif status in ["Processing", "Queued", "Pending"]:
                     continue
@@ -272,33 +277,50 @@ class KontextTextToImage(ControlNode):
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""
         try:
+            self.append_value_to_parameter("status", f"DEBUG - Downloading from URL: {image_url}\n")
             response = requests.get(image_url, timeout=30)
             response.raise_for_status()
-            return response.content
+            image_bytes = response.content
+            self.append_value_to_parameter("status", f"DEBUG - Downloaded {len(image_bytes)} bytes\n")
+            
+            # Log first few bytes to detect if we're getting the same content
+            if len(image_bytes) >= 16:
+                first_bytes = image_bytes[:16].hex()
+                self.append_value_to_parameter("status", f"DEBUG - First 16 bytes: {first_bytes}\n")
+            
+            return image_bytes
         except Exception as e:
             raise ValueError(f"Failed to download image from URL: {str(e)}")
 
     def _create_image_artifact(
-        self, image_bytes: bytes, output_format: str
+        self, image_bytes: bytes, output_format: str, api_seed: int = None
     ) -> ImageUrlArtifact:
         """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
         try:
-            # Generate unique filename with timestamp and hash
-            import hashlib
-
+            # Generate descriptive filename using model, seed, and timestamp
+            model = self.get_parameter_value("model").replace("-", "_")  # Replace hyphens for filename
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-            content_hash = hashlib.md5(image_bytes).hexdigest()[
-                :8
-            ]  # Short hash of content
-            filename = f"kontext_text_to_image_{timestamp}_{content_hash}.{output_format.lower()}"
+            
+            # Use API seed if available, fallback to user seed, otherwise "random" 
+            if api_seed is not None:
+                seed_str = str(api_seed)
+            else:
+                user_seed = self.get_parameter_value("seed")
+                seed_str = str(user_seed) if user_seed is not None else "random"
+            
+            filename = f"bfl_{model}_{seed_str}_{timestamp}.{output_format.lower()}"
+            
+            self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {filename} ({len(image_bytes)} bytes)\n")
 
             # Save to managed file location and get URL
             static_url = GriptapeNodes.StaticFilesManager().save_static_file(
                 image_bytes, filename
             )
+            
+            self.append_value_to_parameter("status", f"DEBUG - Static URL created: {static_url}\n")
 
             return ImageUrlArtifact(
-                value=static_url, name=f"kontext_text_to_image_{timestamp}"
+                value=static_url, name=f"bfl_{model}_{seed_str}_{timestamp}"
             )
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
@@ -307,14 +329,14 @@ class KontextTextToImage(ControlNode):
         """Poll for result, download image, and set output - called via yield."""
         try:
             # Poll for result
-            image_url = self._poll_for_result(api_key, request_id)
+            image_url, api_seed = self._poll_for_result(api_key, request_id)
             
             # Download image immediately to prevent expiration issues
             self.append_value_to_parameter("status", "Downloading generated image...\n")
             image_bytes = self._download_image(image_url)
 
-            # Create image artifact with proper parameters
-            image_artifact = self._create_image_artifact(image_bytes, output_format)
+            # Create image artifact with proper parameters, using API seed if available
+            image_artifact = self._create_image_artifact(image_bytes, output_format, api_seed)
 
             # Set output
             self.parameter_output_values["image"] = image_artifact
@@ -366,7 +388,11 @@ class KontextTextToImage(ControlNode):
     def validate_before_workflow_run(self) -> list[Exception] | None:
         return self.validate_before_node_run()
 
-    def process(self) -> AsyncResult:
+    def process(self) -> AsyncResult[None]:
+        """Non-blocking entry point for Griptape engine."""
+        yield lambda: self._process()
+
+    def _process(self) -> None:
         """Generate image using FLUX.1 Kontext API."""
         try:
             # Get API key
@@ -399,7 +425,7 @@ class KontextTextToImage(ControlNode):
             self.append_value_to_parameter(
                 "status", "Waiting for generation to complete...\n"
             )
-            yield lambda: self._poll_and_process_result(api_key, request_id, output_format)
+            self._poll_and_process_result(api_key, request_id, output_format)
 
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"
