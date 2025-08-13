@@ -32,7 +32,7 @@
             "file_path": "flux_fill.py",
             "metadata": {
                 "category": "image/black_forest_labs",
-                "description": "Combine a image, a mask and a text prompt to create a new image",
+                "description": "Combine an image, a mask and a text prompt to create a new image",
                 "display_name": "FLUX Fill"
             }
         },
