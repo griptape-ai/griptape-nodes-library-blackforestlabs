@@ -171,22 +171,37 @@ class KontextImageEdit(ControlNode):
         return api_key
 
     def _image_to_base64(self, image_artifact) -> str:
-        """Convert ImageArtifact or ImageUrlArtifact to base64 string."""
+        """Convert ImageArtifact, ImageUrlArtifact, or URL string to base64 string."""
         try:
-            # Try the standard to_bytes() method first
-            try:
-                image_bytes = image_artifact.to_bytes()
-                return base64.b64encode(image_bytes).decode("utf-8")
-            except (AttributeError, Exception):
-                # If to_bytes() fails, try to fetch from URL for ImageUrlArtifact
-                if isinstance(image_artifact, ImageUrlArtifact):
-                    response = requests.get(image_artifact.value, timeout=30)
-                    response.raise_for_status()
-                    image_bytes = response.content
+            # If it's a standard artifact with to_bytes method
+            if hasattr(image_artifact, "to_bytes"):
+                try:
+                    image_bytes = image_artifact.to_bytes()
                     return base64.b64encode(image_bytes).decode("utf-8")
-                else:
-                    # Re-raise the original exception if it's not an ImageUrlArtifact
-                    raise
+                except Exception:
+                    # If to_bytes() fails, continue to URL handling
+                    pass
+            
+            # Handle ImageUrlArtifact
+            if isinstance(image_artifact, ImageUrlArtifact):
+                url = image_artifact.value
+            # Handle direct URL string
+            elif isinstance(image_artifact, str):
+                # Validate if string is a proper URL
+                if not (image_artifact.startswith("http://") or image_artifact.startswith("https://")):
+                    raise ValueError(f"Invalid URL format: {image_artifact}. URL must start with http:// or https://")
+                url = image_artifact
+            else:
+                raise ValueError(f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string.")
+            
+            # Fetch and encode image from URL
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            image_bytes = response.content
+            return base64.b64encode(image_bytes).decode("utf-8")
+            
+        except requests.exceptions.RequestException as e:
+            raise ValueError(f"Failed to fetch image from URL: {str(e)}")
         except Exception as e:
             raise ValueError(f"Failed to convert image to base64: {str(e)}")
 
