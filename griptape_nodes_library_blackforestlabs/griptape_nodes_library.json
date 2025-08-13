@@ -28,6 +28,15 @@
     ],
     "nodes": [
         {
+            "class_name": "FluxFill",
+            "file_path": "flux_fill.py",
+            "metadata": {
+                "category": "image/black_forest_labs",
+                "description": "Generate high-quality images from text prompts using FLUX Pro, Dev, and Ultra models",
+                "display_name": "FLUX Fill"
+            }
+        },
+        {
             "class_name": "TextToImage",
             "file_path": "text_to_image.py",
             "metadata": {
