@@ -480,13 +480,6 @@ class FluxFill(ControlNode):
         if not (mask_image or self.incoming_connections.get("mask_image", False)):
             errors.append(ValueError(f"{self.name}: Mask image is required"))
 
-        # Check for prompt
-        prompt = self.get_parameter_value("prompt")
-        if not (prompt or self.incoming_connections.get("prompt", False)):
-            errors.append(
-                ValueError(f"{self.name}: Provide a prompt or make a connection to the prompt parameter in this node.")
-            )
-
         return errors if errors else None
 
     def validate_before_workflow_run(self) -> list[Exception] | None:
@@ -520,11 +513,8 @@ class FluxFill(ControlNode):
             # Prepare request payload
             output_format = self.get_parameter_value("output_format")
             prompt = self.get_parameter_value("prompt")
-            if not prompt:
-                raise ValueError("Prompt is required and cannot be empty")
 
             payload = {
-                "prompt": prompt.strip(),
                 "image": input_image_base64,
                 "mask": mask_image_base64,
                 "steps": int(self.get_parameter_value("steps")),
@@ -532,6 +522,9 @@ class FluxFill(ControlNode):
                 "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
                 "output_format": output_format,
             }
+
+            if prompt:
+                payload["prompt"] = prompt.strip()
 
             self.append_value_to_parameter("status", "Creating fill request...\n")
 
