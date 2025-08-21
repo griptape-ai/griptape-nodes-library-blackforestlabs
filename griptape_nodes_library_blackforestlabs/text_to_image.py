@@ -167,7 +167,9 @@ class TextToImage(ControlNode):
                 name="image",
                 tooltip="Generated image with cached data",
                 output_type="ImageUrlArtifact",
-                allowed_modes={ParameterMode.OUTPUT},
+                allowed_modes={ParameterMode.PROPERTY, ParameterMode.OUTPUT},
+                ui_options={"pulse_on_run": True},
+                settable=False,  # Ensures this serializes on save, but don't let user set it.
             )
         )
 
