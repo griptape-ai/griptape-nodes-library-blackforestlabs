@@ -202,3 +202,5 @@ local/
 scratch/
 temp/
 tmp/ 
+mise.toml
+node-development-guide.md
