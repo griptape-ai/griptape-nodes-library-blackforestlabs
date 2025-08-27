@@ -21,7 +21,7 @@ API_KEY_ENV_VAR = "BFL_API_KEY"
 
 
 class TextToImage(ControlNode):
-    """FLUX text-to-image generation node for Pro, Dev, and Ultra models."""
+    """FLUX text-to-image generation node for Pro, Dev, Ultra, and Kontext models."""
 
     def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
@@ -40,6 +40,8 @@ class TextToImage(ControlNode):
                 traits={
                     Options(
                         choices=[
+                            "flux-kontext-pro",
+                            "flux-kontext-max",
                             "flux-pro-1.1-ultra",
                             "flux-pro-1.1",
                             "flux-pro",
@@ -77,6 +79,7 @@ class TextToImage(ControlNode):
                 traits={
                     Options(
                         choices=[
+                            "3:7",
                             "9:21",
                             "9:16",
                             "2:3",
@@ -85,6 +88,7 @@ class TextToImage(ControlNode):
                             "4:3",
                             "3:2",
                             "16:9",
+                            "7:3",
                             "21:9",
                         ]
                     )
@@ -126,6 +130,18 @@ class TextToImage(ControlNode):
             )
         )
 
+        # Kontext-only (ignored for classic FLUX models)
+        self.add_parameter(
+            Parameter(
+                name="prompt_upsampling",
+                tooltip="If enabled, performs upsampling on the prompt for potentially better results",
+                type=ParameterTypeBuiltin.BOOL.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value=False,
+                ui_options={"display_name": "Prompt Upsampling"},
+            )
+        )
+
         self.add_parameter(
             Parameter(
                 name="raw",
@@ -140,11 +156,11 @@ class TextToImage(ControlNode):
         self.add_parameter(
             Parameter(
                 name="safety_tolerance",
-                tooltip="Moderation level. 1 = most strict, 6 = least strict",
+                tooltip="Moderation level. 0 = most strict, 6 = least strict",
                 type=ParameterTypeBuiltin.INT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=2,
-                traits={Options(choices=["1", "2", "3", "4", "5", "6"])},
+                traits={Options(choices=["0", "1", "2", "3", "4", "5", "6"])},
                 ui_options={"display_name": "Safety Tolerance"},
             )
         )
@@ -246,17 +262,23 @@ class TextToImage(ControlNode):
         return result["id"]
 
     def _poll_and_process_result(self, api_key: str, request_id: str, output_format: str) -> None:
-        """Poll for the generation result, download image, and set output - called via yield."""
+        """Poll for the generation result with backoff, download image, and set output - called via yield."""
         try:
-            # Poll for result
             headers = {"accept": "application/json", "x-key": api_key}
-            max_attempts = 120  # 3 minutes with 1.5s intervals
+            max_attempts = 120
             attempt = 0
+            consecutive_500_errors = 0
+            base_sleep = 1.5
             image_url = None
             api_seed = None
 
             while attempt < max_attempts and image_url is None:
-                time.sleep(1.5)
+                # Exponential backoff with jitter similar to Kontext node
+                import random
+                sleep_time = min(base_sleep * (2 ** min(attempt // 10, 4)), 10)
+                sleep_time += random.uniform(0, 0.5)
+                time.sleep(sleep_time)
+
                 attempt += 1
 
                 try:
@@ -265,57 +287,67 @@ class TextToImage(ControlNode):
                         headers=headers,
                         timeout=30,
                     )
-                    response.raise_for_status()
+
+                    if response.status_code == 500:
+                        consecutive_500_errors += 1
+                        self.append_value_to_parameter(
+                            "status", f"Attempt {attempt}: Server error (500) - #{consecutive_500_errors} consecutive\n"
+                        )
+                        if consecutive_500_errors >= 10:
+                            raise ValueError(
+                                "API appears to have persistent server issues (10+ consecutive 500 errors). "
+                                f"This may be a problem with the {self.get_parameter_value('model')} model endpoint. "
+                                "Try a different model or retry later."
+                            )
+                        continue
+                    elif response.status_code == 429:
+                        self.append_value_to_parameter(
+                            "status", f"Attempt {attempt}: Rate limited, waiting longer...\n"
+                        )
+                        time.sleep(5)
+                        continue
+                    elif response.status_code != 200:
+                        response.raise_for_status()
+
+                    consecutive_500_errors = 0
 
                     result = response.json()
                     status = result.get("status")
-
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: {status}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: {status}\n")
 
                     if status == "Ready":
                         image_url = result.get("result", {}).get("sample")
                         if not image_url:
                             raise ValueError(f"No image URL in result: {result}")
-                        
-                        # Extract the actual seed used by the API
+
                         api_seed = result.get("result", {}).get("seed")
                         if api_seed:
                             self.append_value_to_parameter("status", f"API used seed: {api_seed}\n")
                         break
-
                     elif status in ["Processing", "Queued", "Pending"]:
                         continue
-
                     else:
                         raise ValueError(
                             f"Generation failed with status '{status}': {result}"
                         )
 
                 except requests.RequestException as e:
-                    self.append_value_to_parameter(
-                        "status", f"Request error on attempt {attempt}: {str(e)}\n"
-                    )
+                    if not (hasattr(e, 'response') and e.response and e.response.status_code == 500):
+                        self.append_value_to_parameter(
+                            "status", f"Request error on attempt {attempt}: {str(e)}\n"
+                        )
                     if attempt >= max_attempts:
                         raise
 
             if image_url is None:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
-            # Download image immediately to prevent expiration issues
             self.append_value_to_parameter("status", "Downloading generated image...\n")
             image_bytes = self._download_image(image_url)
-
-            # Create image artifact with proper parameters, using API seed if available
             image_artifact = self._create_image_artifact(image_bytes, output_format, api_seed)
-
-            # Set output
             self.parameter_output_values["image"] = image_artifact
-
             self.append_value_to_parameter(
-                "status",
-                f"✅ Generation completed successfully!\nImage URL: {image_url}\n",
+                "status", f"✅ Generation completed successfully!\nImage URL: {image_url}\n"
             )
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"
@@ -423,28 +455,40 @@ class TextToImage(ControlNode):
             # Prepare request payload
             output_format = self.get_parameter_value("output_format")
 
-            # Extract width and height from image_size
-            image_size = self.get_parameter_value("image_size")
-            try:
-                width, height = map(int, image_size.split("x"))
-            except ValueError:
-                raise ValueError(
-                    "Invalid image size format. Expected format 'widthxheight'."
-                )
-
             prompt = self.get_parameter_value("prompt")
             if not prompt:
                 raise ValueError("Prompt is required and cannot be empty")
 
-            # Update payload to include width and height instead of aspect_ratio
-            payload = {
-                "prompt": prompt.strip(),
-                "width": width,
-                "height": height,
-                "raw": self.get_parameter_value("raw"),
-                "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
-                "output_format": output_format,
-            }
+            model = self.get_parameter_value("model")
+
+            # Build payload conditionally depending on model family
+            if isinstance(model, str) and model.startswith("flux-kontext"):
+                # Kontext endpoints expect aspect_ratio (and ignore width/height and raw)
+                payload = {
+                    "prompt": prompt.strip(),
+                    "aspect_ratio": self.get_parameter_value("aspect_ratio"),
+                    "prompt_upsampling": self.get_parameter_value("prompt_upsampling"),
+                    "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
+                    "output_format": output_format,
+                }
+            else:
+                # Classic FLUX endpoints expect explicit width/height and support raw
+                image_size = self.get_parameter_value("image_size")
+                try:
+                    width, height = map(int, image_size.split("x"))
+                except ValueError:
+                    raise ValueError(
+                        "Invalid image size format. Expected format 'widthxheight'."
+                    )
+
+                payload = {
+                    "prompt": prompt.strip(),
+                    "width": width,
+                    "height": height,
+                    "raw": self.get_parameter_value("raw"),
+                    "safety_tolerance": int(self.get_parameter_value("safety_tolerance")),
+                    "output_format": output_format,
+                }
 
             # Add seed if provided
             seed = self.get_parameter_value("seed")

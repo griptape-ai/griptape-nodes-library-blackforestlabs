@@ -46,15 +46,6 @@
             }
         },
         {
-            "class_name": "KontextTextToImage",
-            "file_path": "kontext_text_to_image.py",
-            "metadata": {
-                "category": "image/black_forest_labs",
-                "description": "Generate high-quality images from text prompts using FLUX.1 Kontext",
-                "display_name": "FLUX.1 Kontext Text-to-Image"
-            }
-        },
-        {
             "class_name": "KontextImageEdit",
             "file_path": "kontext_image_edit.py",
             "metadata": {
