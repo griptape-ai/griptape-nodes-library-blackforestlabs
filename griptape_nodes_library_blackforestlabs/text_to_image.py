@@ -160,7 +160,7 @@ class TextToImage(ControlNode):
                 type=ParameterTypeBuiltin.INT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=2,
-                traits={Options(choices=["0", "1", "2", "3", "4", "5", "6"])},
+                traits={Options(choices=[0, 1, 2, 3, 4, 5, 6])},
                 ui_options={"display_name": "Safety Tolerance"},
             )
         )

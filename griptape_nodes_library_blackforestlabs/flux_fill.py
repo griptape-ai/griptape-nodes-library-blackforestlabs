@@ -405,9 +405,10 @@ class FluxFill(ControlNode):
     ) -> ImageUrlArtifact:
         """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
         try:
-            # Generate descriptive filename using timestamp
+            # Generate descriptive filename using model slug and timestamp
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-            filename = f"bfl_flux_fill_{timestamp}.{output_format.lower()}"
+            model = "flux-pro-1.0-fill".replace("-", "_")
+            filename = f"bfl_{model}_{timestamp}.{output_format.lower()}"
             
             self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {filename} ({len(image_bytes)} bytes)\n")
 
@@ -419,7 +420,7 @@ class FluxFill(ControlNode):
             self.append_value_to_parameter("status", f"DEBUG - Static URL created: {static_url}\n")
 
             return ImageUrlArtifact(
-                value=static_url, name=f"bfl_flux_fill_{timestamp}"
+                value=static_url, name=f"bfl_{model}_{timestamp}"
             )
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")

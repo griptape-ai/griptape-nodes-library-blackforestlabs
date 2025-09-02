@@ -47,6 +47,7 @@ class KontextImageEdit(ControlNode):
                 tooltip="Base image to edit",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
                 allowed_modes={ParameterMode.INPUT},
+                ui_options={"display_name": "Input Image"},
             )
         )
 
@@ -67,6 +68,8 @@ class KontextImageEdit(ControlNode):
         self.incoming_connections["prompt"] = False
         # Initialize incoming connection state for input_image parameter  
         self.incoming_connections["input_image"] = False
+        
+        # Outputs will be cleared after they are defined below
 
 
         self.add_parameter(
@@ -161,6 +164,11 @@ class KontextImageEdit(ControlNode):
                 ui_options={"multiline": True, "pulse_on_run": True},
             )
         )
+
+        # Proactively clear outputs on init to avoid cross-flow shadowing
+        self.parameter_output_values["edited_image"] = None
+        self.set_parameter_value("status", "")
+        self.publish_update_to_parameter("status", "")
 
     def _get_api_key(self) -> str:
         """Retrieve the BFL API key from configuration."""
@@ -543,6 +551,11 @@ class KontextImageEdit(ControlNode):
     def _process(self) -> None:
         """Edit image using FLUX.1 Kontext API."""
         try:
+            # Clear residual outputs at the start of each run
+            self.parameter_output_values["edited_image"] = None
+            self.set_parameter_value("status", "")
+            self.publish_update_to_parameter("status", "")
+
             # Get API key
             api_key = self._get_api_key()
 
