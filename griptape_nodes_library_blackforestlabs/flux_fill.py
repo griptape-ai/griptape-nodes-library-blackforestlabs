@@ -117,7 +117,9 @@ class FluxFill(ControlNode):
                 name="filled_image",
                 tooltip="Image with inpainted/filled regions",
                 output_type="ImageUrlArtifact",
-                allowed_modes={ParameterMode.OUTPUT},
+                allowed_modes={ParameterMode.PROPERTY, ParameterMode.OUTPUT},
+                ui_options={"pulse_on_run": True},
+                settable=False,
             )
         )
 
