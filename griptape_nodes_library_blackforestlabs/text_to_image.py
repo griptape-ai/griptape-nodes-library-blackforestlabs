@@ -228,7 +228,7 @@ class TextToImage(ControlNode):
 
     def _get_api_key(self) -> str:
         """Retrieve the BFL API key from configuration."""
-        api_key = self.get_config_value(service=SERVICE, value=API_KEY_ENV_VAR)
+        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
             raise ValueError(
                 f"BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
@@ -423,7 +423,7 @@ class TextToImage(ControlNode):
             )
 
         # Check for API key
-        api_key = self.get_config_value(service=SERVICE, value=API_KEY_ENV_VAR)
+        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
             errors.append(
                 ValueError(

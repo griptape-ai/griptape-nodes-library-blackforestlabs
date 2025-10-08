@@ -1,6 +1,17 @@
 {
     "name": "Black Forest Labs Library",
     "library_schema_version": "0.1.0",
+    "settings": [
+        {
+            "description": "API keys required by nodes in this library",
+            "category": "app_events.on_app_initialization_complete",
+            "contents": {
+                "secrets_to_register": [
+                    "BFL_API_KEY"
+                ]
+            }
+        }
+    ],
     "metadata": {
         "author": "Griptape",
         "description": "Griptape Nodes for Black Forest Labs APIs including FLUX.1 Kontext and FLUX text-to-image generation and image editing",
