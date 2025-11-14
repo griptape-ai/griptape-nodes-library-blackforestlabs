@@ -1,19 +1,19 @@
-import base64
-import io
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
-from PIL import Image
-from griptape.artifacts import ImageArtifact, ImageUrlArtifact
+from griptape.artifacts import ImageUrlArtifact
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
+
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
-from griptape_nodes.traits.options import Options
+from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 
 SERVICE = "BlackForest Labs"
@@ -23,7 +23,7 @@ API_KEY_ENV_VAR = "BFL_API_KEY"
 class TextToImage(ControlNode):
     """FLUX text-to-image generation node for Pro, Dev, Ultra, and Kontext models."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         # State to track incoming connections
@@ -204,9 +204,7 @@ class TextToImage(ControlNode):
         try:
             width_ratio, height_ratio = map(int, aspect_ratio.split(":"))
         except ValueError:
-            raise ValueError(
-                "Invalid aspect ratio format. Expected format 'width:height'."
-            )
+            raise ValueError("Invalid aspect ratio format. Expected format 'width:height'.")
 
         # Ensure max_size is an integer
         if not isinstance(max_size, int):
@@ -236,8 +234,12 @@ class TextToImage(ControlNode):
             )
         return api_key
 
-    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
-        """Create a generation request and return the request ID."""
+    def _create_request(self, api_key: str, payload: dict[str, Any]) -> tuple[str, str]:
+        """Create a generation request and return the request ID and polling URL.
+
+        Uses the recommended global endpoint (api.bfl.ai) with automatic failover.
+        Returns both the request ID and polling_url as required by the API.
+        """
         headers = {
             "accept": "application/json",
             "x-key": api_key,
@@ -245,24 +247,58 @@ class TextToImage(ControlNode):
         }
 
         # Get selected model for API endpoint
+        # Use recommended global endpoint with automatic failover
+        # See: https://docs.bfl.ai/quick_start/generating_images
         model = self.get_parameter_value("model")
+        api_url = f"https://api.bfl.ai/v1/{model}"
 
-        response = requests.post(
-            f"https://api.us1.bfl.ai/v1/{model}",
-            headers=headers,
-            json=payload,
-            timeout=30,
-        )
-        response.raise_for_status()
+        try:
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
+            response.raise_for_status()
+        except ConnectTimeout as e:
+            error_msg = (
+                f"{self.name}: Connection to BlackForest Labs API timed out after 60 seconds. "
+                f"This may indicate network connectivity issues or the API may be temporarily unavailable. "
+                f"Please check your internet connection and try again."
+            )
+            raise ValueError(error_msg) from e
+        except Timeout as e:
+            error_msg = (
+                f"{self.name}: Request to BlackForest Labs API timed out after 60 seconds. "
+                f"The API may be experiencing high load. Please try again later."
+            )
+            raise ValueError(error_msg) from e
+        except RequestsConnectionError as e:
+            error_msg = (
+                f"{self.name}: Failed to connect to BlackForest Labs API at {api_url}. "
+                f"This may indicate network connectivity issues. Error: {e!s}"
+            )
+            raise ValueError(error_msg) from e
 
         result = response.json()
         if "id" not in result:
-            raise ValueError(f"Unexpected response format: {result}")
+            raise ValueError(f"{self.name}: Unexpected response format: {result}")
 
-        return result["id"]
+        # When using global/regional endpoints, polling_url is required
+        # See: https://docs.bfl.ai/quick_start/generating_images
+        polling_url = result.get("polling_url")
+        if not polling_url:
+            # Fallback for legacy endpoints that don't provide polling_url
+            polling_url = f"https://api.bfl.ai/v1/get_result?id={result['id']}"
 
-    def _poll_and_process_result(self, api_key: str, request_id: str, output_format: str) -> None:
-        """Poll for the generation result with backoff, download image, and set output - called via yield."""
+        return result["id"], polling_url
+
+    def _poll_and_process_result(self, api_key: str, request_id: str, polling_url: str, output_format: str) -> None:
+        """Poll for the generation result with backoff, download image, and set output - called via yield.
+
+        Uses the polling_url provided by the API response, which is required when using
+        the global/regional endpoints. See: https://docs.bfl.ai/quick_start/generating_images
+        """
         try:
             headers = {"accept": "application/json", "x-key": api_key}
             max_attempts = 120
@@ -275,6 +311,7 @@ class TextToImage(ControlNode):
             while attempt < max_attempts and image_url is None:
                 # Exponential backoff with jitter similar to Kontext node
                 import random
+
                 sleep_time = min(base_sleep * (2 ** min(attempt // 10, 4)), 10)
                 sleep_time += random.uniform(0, 0.5)
                 time.sleep(sleep_time)
@@ -282,8 +319,9 @@ class TextToImage(ControlNode):
                 attempt += 1
 
                 try:
+                    # Use the polling_url from the API response (required for global/regional endpoints)
                     response = requests.get(
-                        f"https://api.us1.bfl.ai/v1/get_result?id={request_id}",
+                        polling_url,
                         headers=headers,
                         timeout=30,
                     )
@@ -300,13 +338,13 @@ class TextToImage(ControlNode):
                                 "Try a different model or retry later."
                             )
                         continue
-                    elif response.status_code == 429:
+                    if response.status_code == 429:
                         self.append_value_to_parameter(
                             "status", f"Attempt {attempt}: Rate limited, waiting longer...\n"
                         )
                         time.sleep(5)
                         continue
-                    elif response.status_code != 200:
+                    if response.status_code != 200:
                         response.raise_for_status()
 
                     consecutive_500_errors = 0
@@ -324,18 +362,13 @@ class TextToImage(ControlNode):
                         if api_seed:
                             self.append_value_to_parameter("status", f"API used seed: {api_seed}\n")
                         break
-                    elif status in ["Processing", "Queued", "Pending"]:
+                    if status in ["Processing", "Queued", "Pending"]:
                         continue
-                    else:
-                        raise ValueError(
-                            f"Generation failed with status '{status}': {result}"
-                        )
+                    raise ValueError(f"Generation failed with status '{status}': {result}")
 
                 except requests.RequestException as e:
-                    if not (hasattr(e, 'response') and e.response and e.response.status_code == 500):
-                        self.append_value_to_parameter(
-                            "status", f"Request error on attempt {attempt}: {str(e)}\n"
-                        )
+                    if not (hasattr(e, "response") and e.response and e.response.status_code == 500):
+                        self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {e!s}\n")
                     if attempt >= max_attempts:
                         raise
 
@@ -346,11 +379,9 @@ class TextToImage(ControlNode):
             image_bytes = self._download_image(image_url)
             image_artifact = self._create_image_artifact(image_bytes, output_format, api_seed)
             self.parameter_output_values["image"] = image_artifact
-            self.append_value_to_parameter(
-                "status", f"✅ Generation completed successfully!\nImage URL: {image_url}\n"
-            )
+            self.append_value_to_parameter("status", f"✅ Generation completed successfully!\nImage URL: {image_url}\n")
         except Exception as e:
-            error_msg = f"❌ Generation failed: {str(e)}\n"
+            error_msg = f"❌ Generation failed: {e!s}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
 
@@ -362,52 +393,54 @@ class TextToImage(ControlNode):
             response.raise_for_status()
             image_bytes = response.content
             self.append_value_to_parameter("status", f"DEBUG - Downloaded {len(image_bytes)} bytes\n")
-            
+
             # Log first few bytes to detect if we're getting the same content
             if len(image_bytes) >= 16:
                 first_bytes = image_bytes[:16].hex()
                 self.append_value_to_parameter("status", f"DEBUG - First 16 bytes: {first_bytes}\n")
-            
+
             return image_bytes
         except Exception as e:
-            raise ValueError(f"Failed to download image from URL: {str(e)}")
+            raise ValueError(f"Failed to download image from URL: {e!s}")
 
-    def _create_image_artifact(
-        self, image_bytes: bytes, output_format: str, api_seed: int = None
-    ) -> ImageUrlArtifact:
+    def _create_image_artifact(self, image_bytes: bytes, output_format: str, api_seed: int = None) -> ImageUrlArtifact:
         """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
         try:
             # Generate descriptive filename using model, seed, and timestamp
             model = self.get_parameter_value("model").replace("-", "_")  # Replace hyphens for filename
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-            
-            # Use API seed if available, fallback to user seed, otherwise "random" 
+
+            # Use API seed if available, fallback to user seed, otherwise "random"
             if api_seed is not None:
                 seed_str = str(api_seed)
             else:
                 user_seed = self.get_parameter_value("seed")
                 seed_str = str(user_seed) if user_seed is not None else "random"
-            
+
             filename = f"bfl_{model}_{seed_str}_{timestamp}.{output_format.lower()}"
-            
-            self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {filename} ({len(image_bytes)} bytes)\n")
+
+            self.append_value_to_parameter(
+                "status", f"DEBUG - Creating artifact: {filename} ({len(image_bytes)} bytes)\n"
+            )
 
             # Save to managed file location and get URL
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename
-            )
-            
+            static_url = GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
+
             self.append_value_to_parameter("status", f"DEBUG - Static URL created: {static_url}\n")
 
             return ImageUrlArtifact(value=static_url, name=f"bfl_{model}_{seed_str}_{timestamp}")
         except Exception as e:
-            raise ValueError(f"Failed to create image artifact: {str(e)}")
+            raise ValueError(f"Failed to create image artifact: {e!s}")
 
-    def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as having an incoming connection
         self.incoming_connections[target_parameter.name] = True
 
-    def after_incoming_connection_removed(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection_removed(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as not having an incoming connection
         self.incoming_connections[target_parameter.name] = False
 
@@ -447,7 +480,6 @@ class TextToImage(ControlNode):
 
     def _process(self) -> None:
         """Generate image using FLUX API."""
-
         try:
             # Get API key
             api_key = self._get_api_key()
@@ -477,9 +509,7 @@ class TextToImage(ControlNode):
                 try:
                     width, height = map(int, image_size.split("x"))
                 except ValueError:
-                    raise ValueError(
-                        "Invalid image size format. Expected format 'widthxheight'."
-                    )
+                    raise ValueError("Invalid image size format. Expected format 'widthxheight'.")
 
                 payload = {
                     "prompt": prompt.strip(),
@@ -497,26 +527,21 @@ class TextToImage(ControlNode):
 
             self.append_value_to_parameter("status", "Creating generation request...\n")
 
-            # Create request
-            request_id = self._create_request(api_key, payload)
-            self.append_value_to_parameter(
-                "status", f"Request created with ID: {request_id}\n"
-            )
+            # Create request - returns both request_id and polling_url
+            request_id, polling_url = self._create_request(api_key, payload)
+            self.append_value_to_parameter("status", f"Request created with ID: {request_id}\n")
 
             # Poll for result using async pattern
-            self.append_value_to_parameter(
-                "status", "Waiting for generation to complete...\n"
-            )
-            self._poll_and_process_result(api_key, request_id, output_format)
+            # Use polling_url from response (required for global/regional endpoints)
+            self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
+            self._poll_and_process_result(api_key, request_id, polling_url, output_format)
 
         except Exception as e:
-            error_msg = f"❌ Generation failed: {str(e)}\n"
+            error_msg = f"❌ Generation failed: {e!s}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
 
-    def after_value_set(
-        self, parameter: Parameter, value: Any
-    ) -> None:
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
         # Check if the updated parameter is aspect_ratio or max_size
         if parameter.name in {"aspect_ratio", "max_size"}:
             # Get current values of aspect_ratio and max_size

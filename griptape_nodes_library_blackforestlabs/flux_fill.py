@@ -4,6 +4,8 @@ import time
 from typing import Any, Dict, Optional
 
 import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
 from PIL import Image
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
@@ -179,12 +181,20 @@ class FluxFill(ControlNode):
             raise ValueError(f"Failed to convert image to base64: {str(e)}")
 
     def _create_request(self, api_key: str, payload: Dict[str, Any]) -> tuple[str, str]:
-        """Create a fill request and return the request ID and polling URL."""
+        """Create a fill request and return the request ID and polling URL.
+        
+        Uses the recommended global endpoint (api.bfl.ai) with automatic failover.
+        Returns both the request ID and polling_url as required by the API.
+        """
         headers = {
             "accept": "application/json",
             "x-key": api_key,
             "Content-Type": "application/json",
         }
+
+        # Use recommended global endpoint with automatic failover
+        # See: https://docs.bfl.ai/quick_start/generating_images
+        api_url = "https://api.bfl.ai/v1/flux-pro-1.0-fill"
 
         # Debug: Log the request details (without sensitive data)
         debug_payload = payload.copy()
@@ -202,19 +212,39 @@ class FluxFill(ControlNode):
             f"DEBUG - API Request:\nPayload keys: {list(payload.keys())}\nPayload (redacted): {debug_payload}\n",
         )
 
-        response = requests.post(
-            "https://api.bfl.ai/v1/flux-pro-1.0-fill",
-            headers=headers,
-            json=payload,
-            timeout=30,
-        )
+        try:
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
 
-        # Debug: Log response status and content
-        self.append_value_to_parameter(
-            "status", f"DEBUG - Request Response Status: {response.status_code}\n"
-        )
+            # Debug: Log response status and content
+            self.append_value_to_parameter(
+                "status", f"DEBUG - Request Response Status: {response.status_code}\n"
+            )
 
-        response.raise_for_status()
+            response.raise_for_status()
+        except ConnectTimeout as e:
+            error_msg = (
+                f"{self.name}: Connection to BlackForest Labs API timed out after 60 seconds. "
+                f"This may indicate network connectivity issues or the API may be temporarily unavailable. "
+                f"Please check your internet connection and try again."
+            )
+            raise ValueError(error_msg) from e
+        except Timeout as e:
+            error_msg = (
+                f"{self.name}: Request to BlackForest Labs API timed out after 60 seconds. "
+                f"The API may be experiencing high load. Please try again later."
+            )
+            raise ValueError(error_msg) from e
+        except RequestsConnectionError as e:
+            error_msg = (
+                f"{self.name}: Failed to connect to BlackForest Labs API at {api_url}. "
+                f"This may indicate network connectivity issues. Error: {e!s}"
+            )
+            raise ValueError(error_msg) from e
 
         result = response.json()
         self.append_value_to_parameter(
@@ -222,10 +252,15 @@ class FluxFill(ControlNode):
         )
 
         if "id" not in result:
-            raise ValueError(f"Unexpected response format: {result}")
+            raise ValueError(f"{self.name}: Unexpected response format: {result}")
 
         request_id = result["id"]
-        polling_url = result.get("polling_url")  # Get polling URL if provided
+        # When using global/regional endpoints, polling_url is required
+        # See: https://docs.bfl.ai/quick_start/generating_images
+        polling_url = result.get("polling_url")
+        if not polling_url:
+            # Fallback for legacy endpoints that don't provide polling_url
+            polling_url = f"https://api.bfl.ai/v1/get_result?id={request_id}"
 
         return request_id, polling_url
 
