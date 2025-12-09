@@ -1,4 +1,5 @@
 import base64
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -608,6 +609,9 @@ class Flux2ImageGeneration(ControlNode):
             static_url = GriptapeNodes.StaticFilesManager().save_static_file(
                 image_bytes, filename
             )
+
+            # Normalize URL to fix any double slashes (except in protocol)
+            static_url = re.sub(r'(?<!:)//', '/', static_url)
 
             self.append_value_to_parameter("status", f"DEBUG - Static URL created: {static_url}\n")
 
