@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 
 import requests
 from PIL import Image
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
@@ -187,6 +189,8 @@ class FluxFill(ControlNode):
             "Content-Type": "application/json",
         }
 
+        api_url = f"{BFL_API_BASE_URL}/v1/flux-pro-1.0-fill"
+
         # Debug: Log the request details (without sensitive data)
         debug_payload = payload.copy()
         if "image" in debug_payload:
@@ -203,19 +207,39 @@ class FluxFill(ControlNode):
             f"DEBUG - API Request:\nPayload keys: {list(payload.keys())}\nPayload (redacted): {debug_payload}\n",
         )
 
-        response = requests.post(
-            f"{BFL_API_BASE_URL}/v1/flux-pro-1.0-fill",
-            headers=headers,
-            json=payload,
-            timeout=30,
-        )
+        try:
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
 
-        # Debug: Log response status and content
-        self.append_value_to_parameter(
-            "status", f"DEBUG - Request Response Status: {response.status_code}\n"
-        )
+            # Debug: Log response status and content
+            self.append_value_to_parameter(
+                "status", f"DEBUG - Request Response Status: {response.status_code}\n"
+            )
 
-        response.raise_for_status()
+            response.raise_for_status()
+        except ConnectTimeout as e:
+            error_msg = (
+                f"{self.name}: Connection to BlackForest Labs API timed out after 60 seconds. "
+                f"This may indicate network connectivity issues or the API may be temporarily unavailable. "
+                f"Please check your internet connection and try again."
+            )
+            raise ValueError(error_msg) from e
+        except Timeout as e:
+            error_msg = (
+                f"{self.name}: Request to BlackForest Labs API timed out after 60 seconds. "
+                f"The API may be experiencing high load. Please try again later."
+            )
+            raise ValueError(error_msg) from e
+        except RequestsConnectionError as e:
+            error_msg = (
+                f"{self.name}: Failed to connect to BlackForest Labs API at {api_url}. "
+                f"This may indicate network connectivity issues. Error: {e!s}"
+            )
+            raise ValueError(error_msg) from e
 
         result = response.json()
         self.append_value_to_parameter(
@@ -223,7 +247,7 @@ class FluxFill(ControlNode):
         )
 
         if "polling_url" not in result:
-            raise ValueError(f"Unexpected response format (missing polling_url): {result}")
+            raise ValueError(f"{self.name}: Unexpected response format (missing polling_url): {result}")
 
         return result["polling_url"]
 
