@@ -3,6 +3,8 @@ import time
 from typing import Any, Dict, Optional
 
 import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
@@ -17,6 +19,7 @@ from griptape_nodes.traits.slider import Slider
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
+BFL_API_BASE_URL = "https://api.bfl.ai"
 
 # Constants
 MAX_INPUT_IMAGES = 8  # API supports up to input_image_8
@@ -343,8 +346,8 @@ class Flux2ImageGeneration(ControlNode):
 
         return base64_images
 
-    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> tuple[str, str]:
-        """Create a generation request and return the request ID and polling URL."""
+    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
+        """Create a generation request and return the polling URL."""
         headers = {
             "accept": "application/json",
             "x-key": api_key,
@@ -353,6 +356,7 @@ class Flux2ImageGeneration(ControlNode):
 
         # Get selected model for API endpoint
         model = self.get_parameter_value("model")
+        api_url = f"{BFL_API_BASE_URL}/v1/{model}"
 
         # Debug: Log the request details (without sensitive data)
         debug_payload = payload.copy()
@@ -366,46 +370,56 @@ class Flux2ImageGeneration(ControlNode):
             f"DEBUG - API Request:\nModel: {model}\nPayload keys: {list(payload.keys())}\nPayload (redacted): {debug_payload}\n",
         )
 
-        response = requests.post(
-            f"https://api.bfl.ai/v1/{model}",
-            headers=headers,
-            json=payload,
-            timeout=30,
-        )
+        try:
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
 
-        # Debug: Log response status and content
-        self.append_value_to_parameter(
-            "status", f"DEBUG - Request Response Status: {response.status_code}\n"
-        )
+            # Debug: Log response status and content
+            self.append_value_to_parameter(
+                "status", f"DEBUG - Request Response Status: {response.status_code}\n"
+            )
 
-        response.raise_for_status()
+            response.raise_for_status()
+        except ConnectTimeout as e:
+            error_msg = (
+                f"{self.name}: Connection to BlackForest Labs API timed out after 60 seconds. "
+                f"This may indicate network connectivity issues or the API may be temporarily unavailable. "
+                f"Please check your internet connection and try again."
+            )
+            raise ValueError(error_msg) from e
+        except Timeout as e:
+            error_msg = (
+                f"{self.name}: Request to BlackForest Labs API timed out after 60 seconds. "
+                f"The API may be experiencing high load. Please try again later."
+            )
+            raise ValueError(error_msg) from e
+        except RequestsConnectionError as e:
+            error_msg = (
+                f"{self.name}: Failed to connect to BlackForest Labs API at {api_url}. "
+                f"This may indicate network connectivity issues. Error: {e!s}"
+            )
+            raise ValueError(error_msg) from e
 
         result = response.json()
         self.append_value_to_parameter(
             "status", f"DEBUG - Request Response: {result}\n"
         )
 
-        if "id" not in result:
-            raise ValueError(f"Unexpected response format: {result}")
+        if "polling_url" not in result:
+            raise ValueError(f"{self.name}: Unexpected response format (missing polling_url): {result}")
 
-        request_id = result["id"]
-        polling_url = result.get("polling_url")  # Get polling URL if provided
-
-        return request_id, polling_url
+        return result["polling_url"]
 
     def _poll_for_result(
-        self, api_key: str, request_id: str, polling_url: Optional[str] = None
+        self, api_key: str, polling_url: str
     ) -> tuple[str, Optional[int]]:
         """Poll for the generation result and return the image URL and seed."""
         headers = {"accept": "application/json", "x-key": api_key}
-        
-        # Use provided polling URL or construct default one
-        url = (
-            polling_url
-            if polling_url
-            else f"https://api.bfl.ai/v1/get_result?id={request_id}"
-        )
-        self.append_value_to_parameter("status", f"Polling URL: {url}\n")
+        self.append_value_to_parameter("status", f"Polling URL: {polling_url}\n")
 
         max_attempts = 900  # 7.5 minutes with 0.5s intervals
         attempt = 0
@@ -417,7 +431,7 @@ class Flux2ImageGeneration(ControlNode):
             attempt += 1
 
             try:
-                response = requests.get(url, headers=headers, timeout=30)
+                response = requests.get(polling_url, headers=headers, timeout=30)
                 response.raise_for_status()
 
                 result = response.json()
@@ -601,11 +615,11 @@ class Flux2ImageGeneration(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
-    def _poll_and_process_result(self, api_key: str, request_id: str, polling_url: str, output_format: str) -> None:
+    def _poll_and_process_result(self, api_key: str, polling_url: str, output_format: str) -> None:
         """Poll for result, download image, and set output - called via yield."""
         try:
             # Poll for result
-            image_url, api_seed = self._poll_for_result(api_key, request_id, polling_url)
+            image_url, api_seed = self._poll_for_result(api_key, polling_url)
 
             # Download image immediately to prevent expiration issues
             self.append_value_to_parameter("status", "Downloading generated image...\n")
@@ -765,16 +779,16 @@ class Flux2ImageGeneration(ControlNode):
             self.append_value_to_parameter("status", "Creating generation request...\n")
 
             # Create request
-            request_id, polling_url = self._create_request(api_key, payload)
+            polling_url = self._create_request(api_key, payload)
             self.append_value_to_parameter(
-                "status", f"Request created with ID: {request_id}\n"
+                "status", f"Request created, polling URL: {polling_url}\n"
             )
 
             # Poll for result using async pattern
             self.append_value_to_parameter(
                 "status", "Waiting for generation to complete...\n"
             )
-            self._poll_and_process_result(api_key, request_id, polling_url, output_format)
+            self._poll_and_process_result(api_key, polling_url, output_format)
 
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"

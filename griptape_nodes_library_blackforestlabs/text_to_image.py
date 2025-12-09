@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 
 import requests
 from PIL import Image
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
@@ -18,6 +20,7 @@ from griptape_nodes.traits.slider import Slider
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
+BFL_API_BASE_URL = "https://api.bfl.ai"
 
 
 class TextToImage(ControlNode):
@@ -237,7 +240,7 @@ class TextToImage(ControlNode):
         return api_key
 
     def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
-        """Create a generation request and return the request ID."""
+        """Create a generation request and return the polling URL."""
         headers = {
             "accept": "application/json",
             "x-key": api_key,
@@ -246,22 +249,43 @@ class TextToImage(ControlNode):
 
         # Get selected model for API endpoint
         model = self.get_parameter_value("model")
+        api_url = f"{BFL_API_BASE_URL}/v1/{model}"
 
-        response = requests.post(
-            f"https://api.us1.bfl.ai/v1/{model}",
-            headers=headers,
-            json=payload,
-            timeout=30,
-        )
-        response.raise_for_status()
+        try:
+            response = requests.post(
+                api_url,
+                headers=headers,
+                json=payload,
+                timeout=60,
+            )
+            response.raise_for_status()
+        except ConnectTimeout as e:
+            error_msg = (
+                f"{self.name}: Connection to BlackForest Labs API timed out after 60 seconds. "
+                f"This may indicate network connectivity issues or the API may be temporarily unavailable. "
+                f"Please check your internet connection and try again."
+            )
+            raise ValueError(error_msg) from e
+        except Timeout as e:
+            error_msg = (
+                f"{self.name}: Request to BlackForest Labs API timed out after 60 seconds. "
+                f"The API may be experiencing high load. Please try again later."
+            )
+            raise ValueError(error_msg) from e
+        except RequestsConnectionError as e:
+            error_msg = (
+                f"{self.name}: Failed to connect to BlackForest Labs API at {api_url}. "
+                f"This may indicate network connectivity issues. Error: {e!s}"
+            )
+            raise ValueError(error_msg) from e
 
         result = response.json()
-        if "id" not in result:
-            raise ValueError(f"Unexpected response format: {result}")
+        if "polling_url" not in result:
+            raise ValueError(f"{self.name}: Unexpected response format (missing polling_url): {result}")
 
-        return result["id"]
+        return result["polling_url"]
 
-    def _poll_and_process_result(self, api_key: str, request_id: str, output_format: str) -> None:
+    def _poll_and_process_result(self, api_key: str, polling_url: str, output_format: str) -> None:
         """Poll for the generation result with backoff, download image, and set output - called via yield."""
         try:
             headers = {"accept": "application/json", "x-key": api_key}
@@ -283,7 +307,7 @@ class TextToImage(ControlNode):
 
                 try:
                     response = requests.get(
-                        f"https://api.us1.bfl.ai/v1/get_result?id={request_id}",
+                        polling_url,
                         headers=headers,
                         timeout=30,
                     )
@@ -498,16 +522,16 @@ class TextToImage(ControlNode):
             self.append_value_to_parameter("status", "Creating generation request...\n")
 
             # Create request
-            request_id = self._create_request(api_key, payload)
+            polling_url = self._create_request(api_key, payload)
             self.append_value_to_parameter(
-                "status", f"Request created with ID: {request_id}\n"
+                "status", f"Request created, polling URL: {polling_url}\n"
             )
 
             # Poll for result using async pattern
             self.append_value_to_parameter(
                 "status", "Waiting for generation to complete...\n"
             )
-            self._poll_and_process_result(api_key, request_id, output_format)
+            self._poll_and_process_result(api_key, polling_url, output_format)
 
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"
