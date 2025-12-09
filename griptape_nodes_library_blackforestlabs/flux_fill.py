@@ -17,6 +17,7 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
+BFL_API_BASE_URL = "https://api.bfl.ai"
 
 
 class FluxFill(ControlNode):
@@ -178,8 +179,8 @@ class FluxFill(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to convert image to base64: {str(e)}")
 
-    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> tuple[str, str]:
-        """Create a fill request and return the request ID and polling URL."""
+    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
+        """Create a fill request and return the polling URL."""
         headers = {
             "accept": "application/json",
             "x-key": api_key,
@@ -203,7 +204,7 @@ class FluxFill(ControlNode):
         )
 
         response = requests.post(
-            "https://api.bfl.ai/v1/flux-pro-1.0-fill",
+            f"{BFL_API_BASE_URL}/v1/flux-pro-1.0-fill",
             headers=headers,
             json=payload,
             timeout=30,
@@ -221,27 +222,17 @@ class FluxFill(ControlNode):
             "status", f"DEBUG - Request Response: {result}\n"
         )
 
-        if "id" not in result:
-            raise ValueError(f"Unexpected response format: {result}")
+        if "polling_url" not in result:
+            raise ValueError(f"Unexpected response format (missing polling_url): {result}")
 
-        request_id = result["id"]
-        polling_url = result.get("polling_url")  # Get polling URL if provided
-
-        return request_id, polling_url
+        return result["polling_url"]
 
     def _poll_for_result(
-        self, api_key: str, request_id: str, polling_url: Optional[str] = None
+        self, api_key: str, polling_url: str
     ) -> str:
         """Poll for the filling result and return the image URL."""
         headers = {"accept": "application/json", "x-key": api_key}
-
-        # Use provided polling URL or construct default one
-        url = (
-            polling_url
-            if polling_url
-            else f"https://api.bfl.ai/v1/get_result?id={request_id}"
-        )
-        self.append_value_to_parameter("status", f"Polling URL: {url}\n")
+        self.append_value_to_parameter("status", f"Polling URL: {polling_url}\n")
 
         max_attempts = 900  # 7.5 minutes with 0.5s intervals (300 * 1.5 / 0.5)
         attempt = 0
@@ -253,7 +244,7 @@ class FluxFill(ControlNode):
             attempt += 1
 
             try:
-                response = requests.get(url, headers=headers, timeout=30)
+                response = requests.get(polling_url, headers=headers, timeout=30)
                 response.raise_for_status()
 
                 result = response.json()
@@ -427,11 +418,11 @@ class FluxFill(ControlNode):
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
-    def _poll_and_process_result(self, api_key: str, request_id: str, polling_url: str, output_format: str) -> None:
+    def _poll_and_process_result(self, api_key: str, polling_url: str, output_format: str) -> None:
         """Poll for result, download image, and set output - called via yield."""
         try:
             # Poll for result
-            image_url = self._poll_for_result(api_key, request_id, polling_url)
+            image_url = self._poll_for_result(api_key, polling_url)
             
             # Download image immediately to prevent expiration issues
             self.append_value_to_parameter("status", "Downloading filled image...\n")
@@ -532,16 +523,16 @@ class FluxFill(ControlNode):
             self.append_value_to_parameter("status", "Creating fill request...\n")
 
             # Create request
-            request_id, polling_url = self._create_request(api_key, payload)
+            polling_url = self._create_request(api_key, payload)
             self.append_value_to_parameter(
-                "status", f"Request created with ID: {request_id}\n"
+                "status", f"Request created, polling URL: {polling_url}\n"
             )
 
             # Poll for result using async pattern
             self.append_value_to_parameter(
                 "status", "Waiting for fill operation to complete...\n"
             )
-            self._poll_and_process_result(api_key, request_id, polling_url, output_format)
+            self._poll_and_process_result(api_key, polling_url, output_format)
 
         except Exception as e:
             error_msg = f"❌ Fill operation failed: {str(e)}\n"
