@@ -26,7 +26,7 @@ BFL_API_BASE_URL = "https://api.bfl.ai"
 
 
 class TextToImage(ControlNode):
-    """FLUX text-to-image generation node for Pro, Dev, Ultra, and Kontext models."""
+    """FLUX text-to-image generation node for Klein, Pro, Dev, Ultra, and Kontext models."""
 
     def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
@@ -38,13 +38,15 @@ class TextToImage(ControlNode):
         self.add_parameter(
             Parameter(
                 name="model",
-                tooltip="FLUX model to use. Ultra has highest quality, Pro is balanced, Dev is open-source.",
+                tooltip="FLUX model to use. Klein is fastest (sub-second), Ultra has highest quality, Pro is balanced, Dev is open-source.",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="flux-pro-1.1",
                 traits={
                     Options(
                         choices=[
+                            "flux-2-klein-4b",
+                            "flux-2-klein-9b",
                             "flux-kontext-pro",
                             "flux-kontext-max",
                             "flux-pro-1.1-ultra",
@@ -135,11 +137,11 @@ class TextToImage(ControlNode):
             )
         )
 
-        # Kontext-only (ignored for classic FLUX models)
+        # Kontext-only (ignored for classic FLUX models and Klein)
         self.add_parameter(
             Parameter(
                 name="prompt_upsampling",
-                tooltip="If enabled, performs upsampling on the prompt for potentially better results",
+                tooltip="If enabled, performs upsampling on the prompt for potentially better results (not available for Klein models)",
                 type=ParameterTypeBuiltin.BOOL.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=False,
@@ -203,6 +205,15 @@ class TextToImage(ControlNode):
                 ui_options={"multiline": True, "pulse_on_run": True},
             )
         )
+
+        # Initialize parameter visibility based on default model
+        self._initialize_parameter_visibility()
+
+    def _initialize_parameter_visibility(self) -> None:
+        """Initialize parameter visibility based on default model."""
+        default_model = self.get_parameter_value("model") or "flux-pro-1.1"
+        if isinstance(default_model, str) and default_model.startswith("flux-2-klein"):
+            self.hide_parameter_by_name("prompt_upsampling")
 
     def _calculate_image_size(self, max_size: int, aspect_ratio: str) -> str:
         # Parse the aspect ratio
@@ -558,3 +569,12 @@ class TextToImage(ControlNode):
             # Set the image_size parameter
             self.set_parameter_value("image_size", image_size)
             self.publish_update_to_parameter("image_size", image_size)
+        
+        # Hide prompt_upsampling for Klein models (they don't support it)
+        if parameter.name == "model":
+            if isinstance(value, str) and value.startswith("flux-2-klein"):
+                self.hide_parameter_by_name("prompt_upsampling")
+                # Reset to False when switching to Klein
+                self.set_parameter_value("prompt_upsampling", False)
+            else:
+                self.show_parameter_by_name("prompt_upsampling")
