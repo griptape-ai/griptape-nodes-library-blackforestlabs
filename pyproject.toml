@@ -1,6 +1,6 @@
 [project]
 name = "griptape_nodes_library_blackforestlabs"
-version = "0.1.0"
+version = "0.2.0"
 description = "Griptape Nodes for Black Forest Labs"
 authors = [
     {name = "Your Name",email = "you@example.com"}
