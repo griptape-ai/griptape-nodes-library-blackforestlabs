@@ -5,7 +5,7 @@ This library provides Griptape Nodes for interacting with Black Forest Labs' FLU
 ## Features
 
 - **FLUX Text-to-Image**: Generate images using FLUX Klein (sub-second), Pro, Dev, and Ultra models
-  - **FLUX 2 Klein**: Sub-second inference with open weights (4B: Apache 2.0, 9B: FLUX NCL)
+  - **FLUX 2 Klein**: Sub-second inference with open weights (4B: Apache 2.0, 9B: FLUX NCL if running locally)
   - **FLUX Pro/Ultra**: Premium quality models for production use
   - **FLUX Dev**: Open-source model for development and experimentation
 - **FLUX.1 Kontext Text-to-Image**: Generate high-quality images from text prompts with Kontext models
