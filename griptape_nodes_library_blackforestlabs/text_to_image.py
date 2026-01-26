@@ -13,6 +13,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterTypeBuiltin,
 )
 from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
+from griptape_nodes.exe_types.param_types.parameter_image import ParameterImage
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
@@ -76,14 +77,10 @@ class TextToImage(ControlNode):
 
         # Optional input image for Klein models (image-to-image generation)
         self.add_parameter(
-            Parameter(
+            ParameterImage(
                 name="input_image",
-                input_types=["ImageArtifact", "ImageUrlArtifact", "str"],
-                type="ImageArtifact",
-                default_value=None,
                 tooltip="Optional input image for image-to-image generation with Klein models (supports up to 20MB or 20 megapixels)",
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                ui_options={"display_name": "Input Image"},
+                allow_output=False,
             )
         )
 
