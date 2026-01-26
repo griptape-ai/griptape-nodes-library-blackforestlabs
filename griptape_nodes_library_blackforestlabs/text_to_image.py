@@ -1,14 +1,12 @@
 import base64
-import io
 import re
 import time
 from typing import Any, Dict, Optional
 
 import requests
-from PIL import Image
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ConnectTimeout, Timeout
-from griptape.artifacts import ImageArtifact, ImageUrlArtifact
+from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
@@ -75,6 +73,19 @@ class TextToImage(ControlNode):
 
         # Initialize incoming connection state for prompt parameter
         self.incoming_connections["prompt"] = False
+
+        # Optional input image for Klein models (image-to-image generation)
+        self.add_parameter(
+            Parameter(
+                name="input_image",
+                input_types=["ImageArtifact", "ImageUrlArtifact", "str"],
+                type="ImageArtifact",
+                default_value=None,
+                tooltip="Optional input image for image-to-image generation with Klein models (supports up to 20MB or 20 megapixels)",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                ui_options={"display_name": "Input Image"},
+            )
+        )
 
         self.add_parameter(
             Parameter(
@@ -212,8 +223,15 @@ class TextToImage(ControlNode):
     def _initialize_parameter_visibility(self) -> None:
         """Initialize parameter visibility based on default model."""
         default_model = self.get_parameter_value("model") or "flux-pro-1.1"
-        if isinstance(default_model, str) and default_model.startswith("flux-2-klein"):
+        is_klein_model = isinstance(default_model, str) and default_model.startswith("flux-2-klein")
+        
+        if is_klein_model:
+            # Klein models don't support prompt_upsampling but do support input_image
             self.hide_parameter_by_name("prompt_upsampling")
+            self.show_parameter_by_name("input_image")
+        else:
+            # Non-Klein models: hide input_image (only for Klein), show prompt_upsampling
+            self.hide_parameter_by_name("input_image")
 
     def _calculate_image_size(self, max_size: int, aspect_ratio: str) -> str:
         # Parse the aspect ratio
@@ -251,6 +269,103 @@ class TextToImage(ControlNode):
                 "Get your API key from: https://docs.bfl.ml/"
             )
         return api_key
+
+    def _process_input_image(self, image_input: Any) -> Optional[str]:
+        """Process input image and convert to base64 data URI.
+        
+        Args:
+            image_input: The input image (can be ImageArtifact, ImageUrlArtifact, str, or None)
+            
+        Returns:
+            Base64 data URI string or None if no input image
+        """
+        if not image_input:
+            return None
+
+        # Extract string value from input
+        image_value = self._extract_image_value(image_input)
+        if not image_value:
+            return None
+
+        return self._convert_to_base64_data_uri(image_value)
+
+    def _extract_image_value(self, image_input: Any) -> Optional[str]:
+        """Extract string value from various image input types.
+        
+        Args:
+            image_input: The input image (can be ImageArtifact, ImageUrlArtifact, or str)
+            
+        Returns:
+            String value (URL or base64) or None
+        """
+        if isinstance(image_input, str):
+            return image_input
+
+        try:
+            # ImageUrlArtifact: .value holds URL string
+            if hasattr(image_input, "value"):
+                value = getattr(image_input, "value", None)
+                if isinstance(value, str):
+                    return value
+
+            # ImageArtifact: .base64 holds raw or data-URI
+            if hasattr(image_input, "base64"):
+                b64 = getattr(image_input, "base64", None)
+                if isinstance(b64, str) and b64:
+                    return b64
+        except Exception as e:
+            self.append_value_to_parameter("status", f"Failed to extract image value: {e}\n")
+
+        return None
+
+    def _convert_to_base64_data_uri(self, image_value: str) -> Optional[str]:
+        """Convert image value to base64 data URI.
+        
+        Args:
+            image_value: URL or base64 string
+            
+        Returns:
+            Base64 data URI string or None
+        """
+        # If it's already a data URI, return it
+        if image_value.startswith("data:image/"):
+            return image_value
+
+        # If it's a URL, download and convert to base64
+        if image_value.startswith(("http://", "https://")):
+            return self._download_and_encode_image(image_value)
+
+        # Assume it's raw base64 without data URI prefix
+        return f"data:image/png;base64,{image_value}"
+
+    def _download_and_encode_image(self, url: str) -> Optional[str]:
+        """Download image from URL and encode as base64 data URI.
+        
+        Args:
+            url: URL of the image to download
+            
+        Returns:
+            Base64 data URI string or None if download fails
+        """
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            image_bytes = response.content
+            
+            # Detect format from content type or default to png
+            content_type = response.headers.get("Content-Type", "image/png")
+            if "jpeg" in content_type or "jpg" in content_type:
+                format_str = "jpeg"
+            elif "png" in content_type:
+                format_str = "png"
+            else:
+                format_str = "png"
+            
+            b64_string = base64.b64encode(image_bytes).decode("utf-8")
+            return f"data:image/{format_str};base64,{b64_string}"
+        except Exception as e:
+            self.append_value_to_parameter("status", f"Failed to download image from URL {url}: {e}\n")
+            return None
 
     def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
         """Create a generation request and return the polling URL."""
@@ -530,6 +645,15 @@ class TextToImage(ControlNode):
                     "output_format": output_format,
                 }
 
+                # Add input_image for Klein models (image-to-image generation)
+                if isinstance(model, str) and model.startswith("flux-2-klein"):
+                    input_image = self.get_parameter_value("input_image")
+                    if input_image:
+                        input_image_data = self._process_input_image(input_image)
+                        if input_image_data:
+                            payload["input_image"] = input_image_data
+                            self.append_value_to_parameter("status", "Input image added to request\n")
+
             # Add seed if provided
             seed = self.get_parameter_value("seed")
             if seed is not None:
@@ -570,11 +694,18 @@ class TextToImage(ControlNode):
             self.set_parameter_value("image_size", image_size)
             self.publish_update_to_parameter("image_size", image_size)
         
-        # Hide prompt_upsampling for Klein models (they don't support it)
+        # Handle parameter visibility for Klein models
         if parameter.name == "model":
-            if isinstance(value, str) and value.startswith("flux-2-klein"):
+            is_klein_model = isinstance(value, str) and value.startswith("flux-2-klein")
+            
+            if is_klein_model:
+                # Klein models don't support prompt_upsampling but do support input_image
                 self.hide_parameter_by_name("prompt_upsampling")
-                # Reset to False when switching to Klein
                 self.set_parameter_value("prompt_upsampling", False)
+                self.show_parameter_by_name("input_image")
             else:
+                # Non-Klein models: hide input_image, show prompt_upsampling
                 self.show_parameter_by_name("prompt_upsampling")
+                self.hide_parameter_by_name("input_image")
+                # Clear input_image when switching away from Klein
+                self.set_parameter_value("input_image", None)
