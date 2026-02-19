@@ -18,6 +18,7 @@ from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.traits.slider import Slider
+from griptape_nodes.files.file import File, FileLoadError
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
@@ -317,13 +318,9 @@ class Flux2ImageGeneration(ControlNode):
                 raise ValueError(f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string.")
 
             # Fetch and encode image from URL
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            image_bytes = response.content
+            image_bytes = File(url).read_bytes()
             return base64.b64encode(image_bytes).decode("utf-8")
 
-        except requests.exceptions.RequestException as e:
-            raise ValueError(f"Failed to fetch image from URL: {str(e)}")
         except Exception as e:
             raise ValueError(f"Failed to convert image to base64: {str(e)}")
 
@@ -570,21 +567,16 @@ class Flux2ImageGeneration(ControlNode):
 
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""
-        try:
-            self.append_value_to_parameter("status", f"DEBUG - Downloading from URL: {image_url}\n")
-            response = requests.get(image_url, timeout=30)
-            response.raise_for_status()
-            image_bytes = response.content
-            self.append_value_to_parameter("status", f"DEBUG - Downloaded {len(image_bytes)} bytes\n")
+        self.append_value_to_parameter("status", f"DEBUG - Downloading from URL: {image_url}\n")
+        image_bytes = File(image_url).read_bytes()
+        self.append_value_to_parameter("status", f"DEBUG - Downloaded {len(image_bytes)} bytes\n")
 
-            # Log first few bytes to detect if we're getting the same content
-            if len(image_bytes) >= 16:
-                first_bytes = image_bytes[:16].hex()
-                self.append_value_to_parameter("status", f"DEBUG - First 16 bytes: {first_bytes}\n")
+        # Log first few bytes to detect if we're getting the same content
+        if len(image_bytes) >= 16:
+            first_bytes = image_bytes[:16].hex()
+            self.append_value_to_parameter("status", f"DEBUG - First 16 bytes: {first_bytes}\n")
 
-            return image_bytes
-        except Exception as e:
-            raise ValueError(f"Failed to download image from URL: {str(e)}")
+        return image_bytes
 
     def _create_image_artifact(
         self, image_bytes: bytes, output_format: str, api_seed: Optional[int] = None
