@@ -1,0 +1,76 @@
+{
+  "name": "Black Forest Labs Library",
+  "library_schema_version": "0.1.0",
+  "settings": [
+    {
+      "description": "API keys required by nodes in this library",
+      "category": "app_events.on_app_initialization_complete",
+      "contents": {
+        "secrets_to_register": ["BFL_API_KEY"]
+      }
+    }
+  ],
+  "metadata": {
+    "author": "Griptape",
+    "description": "Griptape Nodes for Black Forest Labs APIs including FLUX.1 Kontext and FLUX text-to-image generation and image editing",
+    "library_version": "0.2.1",
+    "engine_version": "0.66.0",
+    "tags": [
+      "Griptape",
+      "AI",
+      "Black Forest Labs",
+      "FLUX",
+      "Image Generation",
+      "Image Editing",
+      "Text-to-Image"
+    ]
+  },
+  "categories": [
+    {
+      "image/black_forest_labs": {
+        "color": "border-purple-500",
+        "title": "Image/Black Forest Labs",
+        "description": "FLUX nodes for image generation and editing",
+        "icon": "Image"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "class_name": "FluxFill",
+      "file_path": "flux_fill.py",
+      "metadata": {
+        "category": "image/black_forest_labs",
+        "description": "Combine an image, a mask and a text prompt to create a new image",
+        "display_name": "FLUX Fill"
+      }
+    },
+    {
+      "class_name": "TextToImage",
+      "file_path": "text_to_image.py",
+      "metadata": {
+        "category": "image/black_forest_labs",
+        "description": "Generate high-quality images from text prompts using FLUX Pro, Dev, and Ultra models",
+        "display_name": "FLUX Text-to-Image"
+      }
+    },
+    {
+      "class_name": "KontextImageEdit",
+      "file_path": "kontext_image_edit.py",
+      "metadata": {
+        "category": "image/black_forest_labs",
+        "description": "Edit existing images using FLUX.1 Kontext with text prompts for object modification, text editing, and smart changes",
+        "display_name": "FLUX.1 Kontext Image Edit"
+      }
+    },
+    {
+      "class_name": "Flux2ImageGeneration",
+      "file_path": "flux_2_image_generation.py",
+      "metadata": {
+        "category": "image/black_forest_labs",
+        "description": "Generate images using FLUX 2 Pro and Flex models with support for text-to-image and image-to-image",
+        "display_name": "FLUX 2 Image Generation"
+      }
+    }
+  ]
+}
