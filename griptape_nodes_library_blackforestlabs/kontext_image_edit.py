@@ -4,20 +4,20 @@ import time
 from typing import Any, Dict, Optional
 
 import requests
-from PIL import Image
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import ConnectTimeout, Timeout
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
-from griptape_nodes.traits.options import Options
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
+from PIL import Image
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
@@ -71,11 +71,10 @@ class KontextImageEdit(ControlNode):
 
         # Initialize incoming connection state for prompt parameter
         self.incoming_connections["prompt"] = False
-        # Initialize incoming connection state for input_image parameter  
+        # Initialize incoming connection state for input_image parameter
         self.incoming_connections["input_image"] = False
-        
-        # Outputs will be cleared after they are defined below
 
+        # Outputs will be cleared after they are defined below
 
         self.add_parameter(
             Parameter(
@@ -150,10 +149,10 @@ class KontextImageEdit(ControlNode):
 
         self._output_file = ProjectFileParameter(
             self,
-            parameter_name="output_file",
-            default_value="flux_image.png",
+            name="output_file",
+            default_filename="flux_image.png",
         )
-        self._output_file.add_input_parameters()
+        self._output_file.add_parameter()
 
         # Output parameters
         self.add_parameter(
@@ -203,7 +202,7 @@ class KontextImageEdit(ControlNode):
                 except Exception:
                     # If to_bytes() fails, continue to URL handling
                     pass
-            
+
             # Handle ImageUrlArtifact
             if isinstance(image_artifact, ImageUrlArtifact):
                 url = image_artifact.value
@@ -214,8 +213,10 @@ class KontextImageEdit(ControlNode):
                     raise ValueError(f"Invalid URL format: {image_artifact}. URL must start with http:// or https://")
                 url = image_artifact
             else:
-                raise ValueError(f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string.")
-            
+                raise ValueError(
+                    f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string."
+                )
+
             # Fetch and encode image from URL
             image_bytes = File(url).read_bytes()
             return base64.b64encode(image_bytes).decode("utf-8")
@@ -238,9 +239,7 @@ class KontextImageEdit(ControlNode):
         # Debug: Log the request details (without sensitive data)
         debug_payload = payload.copy()
         if "input_image" in debug_payload:
-            debug_payload["input_image"] = (
-                f"<base64_image_{len(payload['input_image'])}_chars>"
-            )
+            debug_payload["input_image"] = f"<base64_image_{len(payload['input_image'])}_chars>"
 
         self.append_value_to_parameter(
             "status",
@@ -256,9 +255,7 @@ class KontextImageEdit(ControlNode):
             )
 
             # Debug: Log response status and content
-            self.append_value_to_parameter(
-                "status", f"DEBUG - Request Response Status: {response.status_code}\n"
-            )
+            self.append_value_to_parameter("status", f"DEBUG - Request Response Status: {response.status_code}\n")
 
             response.raise_for_status()
         except ConnectTimeout as e:
@@ -282,18 +279,14 @@ class KontextImageEdit(ControlNode):
             raise ValueError(error_msg) from e
 
         result = response.json()
-        self.append_value_to_parameter(
-            "status", f"DEBUG - Request Response: {result}\n"
-        )
+        self.append_value_to_parameter("status", f"DEBUG - Request Response: {result}\n")
 
         if "polling_url" not in result:
             raise ValueError(f"{self.name}: Unexpected response format (missing polling_url): {result}")
 
         return result["polling_url"]
 
-    def _poll_for_result(
-        self, api_key: str, polling_url: str
-    ) -> str:
+    def _poll_for_result(self, api_key: str, polling_url: str) -> str:
         """Poll for the editing result and return the image URL."""
         headers = {"accept": "application/json", "x-key": api_key}
         self.append_value_to_parameter("status", f"Polling URL: {polling_url}\n")
@@ -329,9 +322,7 @@ class KontextImageEdit(ControlNode):
                     )
 
                 # Log detailed status for debugging
-                self.append_value_to_parameter(
-                    "status", f"Attempt {attempt}/{max_attempts}: {status}"
-                )
+                self.append_value_to_parameter("status", f"Attempt {attempt}/{max_attempts}: {status}")
                 if "result" in result and result.get("result") is not None:
                     self.append_value_to_parameter(
                         "status",
@@ -356,27 +347,21 @@ class KontextImageEdit(ControlNode):
 
                     # Try to get more details about why it's stuck
                     if "details" in result and result.get("details"):
-                        self.append_value_to_parameter(
-                            "status", f"API Details: {result.get('details')}\n"
-                        )
+                        self.append_value_to_parameter("status", f"API Details: {result.get('details')}\n")
 
                 if status == "Ready":
                     image_url = result.get("result", {}).get("sample")
                     if not image_url:
                         # Try alternative result field names
-                        alt_url = result.get("result", {}).get("url") or result.get(
-                            "result", {}
-                        ).get("image_url")
+                        alt_url = result.get("result", {}).get("url") or result.get("result", {}).get("image_url")
                         if alt_url:
                             image_url = alt_url
                         else:
-                            self.append_value_to_parameter(
-                                "status", f"Debug - Full API response: {result}\n"
-                            )
+                            self.append_value_to_parameter("status", f"Debug - Full API response: {result}\n")
                             raise ValueError(
                                 f"No image URL found in result. Available keys: {list(result.get('result', {}).keys())}"
                             )
-                    
+
                     # Extract the actual seed used by the API
                     api_seed = result.get("result", {}).get("seed")
                     if api_seed:
@@ -399,7 +384,8 @@ class KontextImageEdit(ControlNode):
                         "status", f"Request was blocked by content moderation: {', '.join(moderation_reasons)}\n"
                     )
                     self.append_value_to_parameter(
-                        "status", "💡 Try: Increase safety_tolerance, use different wording, or avoid restricted content (police, violence, etc.)\n"
+                        "status",
+                        "💡 Try: Increase safety_tolerance, use different wording, or avoid restricted content (police, violence, etc.)\n",
                     )
                     raise ValueError(
                         f"Request blocked by content moderation: {', '.join(moderation_reasons)}. "
@@ -407,15 +393,9 @@ class KontextImageEdit(ControlNode):
                     )
 
                 elif status == "Error" or status == "Failed":
-                    error_details = result.get("result", {}).get(
-                        "error", "Unknown error"
-                    )
-                    self.append_value_to_parameter(
-                        "status", f"API Error Details: {result}\n"
-                    )
-                    raise ValueError(
-                        f"Editing failed with status '{status}': {error_details}"
-                    )
+                    error_details = result.get("result", {}).get("error", "Unknown error")
+                    self.append_value_to_parameter("status", f"API Error Details: {result}\n")
+                    raise ValueError(f"Editing failed with status '{status}': {error_details}")
 
                 else:
                     # Log unknown status for debugging but continue polling
@@ -426,9 +406,7 @@ class KontextImageEdit(ControlNode):
                     continue
 
             except requests.RequestException as e:
-                self.append_value_to_parameter(
-                    "status", f"Request error on attempt {attempt}: {str(e)}\n"
-                )
+                self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
                 if attempt >= max_attempts:
                     raise
                 continue
@@ -456,9 +434,7 @@ class KontextImageEdit(ControlNode):
 
         return image_bytes
 
-    def _create_image_artifact(
-        self, image_bytes: bytes, output_format: str, api_seed: int = None
-    ) -> ImageUrlArtifact:
+    def _create_image_artifact(self, image_bytes: bytes, output_format: str, api_seed: int = None) -> ImageUrlArtifact:
         """Create ImageUrlArtifact by saving to the project file location."""
         try:
             # Generate descriptive name using model, seed, and timestamp
@@ -474,17 +450,18 @@ class KontextImageEdit(ControlNode):
 
             artifact_name = f"bfl_{model}_{seed_str}_{timestamp}"
 
-            self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n")
+            self.append_value_to_parameter(
+                "status",
+                f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n",
+            )
 
             # Save to project file location and get URL
-            saved = self._output_file.build_file()
-            saved.write_bytes(image_bytes)
+            dest = self._output_file.build_file()
+            saved = dest.write_bytes(image_bytes)
 
             self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
 
-            return ImageUrlArtifact(
-                value=saved.location, name=artifact_name
-            )
+            return ImageUrlArtifact(value=saved.location, name=artifact_name)
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
@@ -493,7 +470,7 @@ class KontextImageEdit(ControlNode):
         try:
             # Poll for result
             image_url, api_seed = self._poll_for_result(api_key, polling_url)
-            
+
             # Download image immediately to prevent expiration issues
             self.append_value_to_parameter("status", "Downloading edited image...\n")
             image_bytes = self._download_image(image_url)
@@ -513,11 +490,15 @@ class KontextImageEdit(ControlNode):
             self.append_value_to_parameter("status", error_msg)
             raise
 
-    def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as having an incoming connection
         self.incoming_connections[target_parameter.name] = True
 
-    def after_incoming_connection_removed(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection_removed(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as not having an incoming connection
         self.incoming_connections[target_parameter.name] = False
 
@@ -559,7 +540,6 @@ class KontextImageEdit(ControlNode):
     def process(self) -> AsyncResult[None]:
         """Non-blocking entry point for Griptape engine."""
         yield lambda: self._process()
-        
 
     def _process(self) -> None:
         """Edit image using FLUX.1 Kontext API."""
@@ -574,9 +554,7 @@ class KontextImageEdit(ControlNode):
 
             # Get input image and convert to base64
             input_image = self.get_parameter_value("input_image")
-            self.append_value_to_parameter(
-                "status", "Converting input image to base64...\n"
-            )
+            self.append_value_to_parameter("status", "Converting input image to base64...\n")
             input_image_base64 = self._image_to_base64(input_image)
 
             # Prepare request payload
@@ -603,14 +581,10 @@ class KontextImageEdit(ControlNode):
 
             # Create request
             polling_url = self._create_request(api_key, payload)
-            self.append_value_to_parameter(
-                "status", f"Request created, polling URL: {polling_url}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created, polling URL: {polling_url}\n")
 
             # Poll for result using async pattern
-            self.append_value_to_parameter(
-                "status", "Waiting for editing to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for editing to complete...\n")
             self._poll_and_process_result(api_key, polling_url, output_format)
 
         except Exception as e:

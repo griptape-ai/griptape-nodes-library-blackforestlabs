@@ -4,20 +4,20 @@ import time
 from typing import Any, Dict, Optional
 
 import requests
-from PIL import Image
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import ConnectTimeout, Timeout
 from griptape.artifacts import ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
-from griptape_nodes.traits.options import Options
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
+from PIL import Image
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
@@ -118,10 +118,10 @@ class FluxFill(ControlNode):
 
         self._output_file = ProjectFileParameter(
             self,
-            parameter_name="output_file",
-            default_value="flux_image.png",
+            name="output_file",
+            default_filename="flux_image.png",
         )
-        self._output_file.add_input_parameters()
+        self._output_file.add_parameter()
 
         # Output parameters
         self.add_parameter(
@@ -166,7 +166,7 @@ class FluxFill(ControlNode):
                 except Exception:
                     # If to_bytes() fails, continue to URL handling
                     pass
-            
+
             # Handle ImageUrlArtifact
             if isinstance(image_artifact, ImageUrlArtifact):
                 url = image_artifact.value
@@ -177,8 +177,10 @@ class FluxFill(ControlNode):
                     raise ValueError(f"Invalid URL format: {image_artifact}. URL must start with http:// or https://")
                 url = image_artifact
             else:
-                raise ValueError(f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string.")
-            
+                raise ValueError(
+                    f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string."
+                )
+
             # Fetch and encode image from URL
             image_bytes = File(url).read_bytes()
             return base64.b64encode(image_bytes).decode("utf-8")
@@ -199,13 +201,9 @@ class FluxFill(ControlNode):
         # Debug: Log the request details (without sensitive data)
         debug_payload = payload.copy()
         if "image" in debug_payload:
-            debug_payload["image"] = (
-                f"<base64_image_{len(payload['image'])}_chars>"
-            )
+            debug_payload["image"] = f"<base64_image_{len(payload['image'])}_chars>"
         if "mask" in debug_payload:
-            debug_payload["mask"] = (
-                f"<base64_mask_{len(payload['mask'])}_chars>"
-            )
+            debug_payload["mask"] = f"<base64_mask_{len(payload['mask'])}_chars>"
 
         self.append_value_to_parameter(
             "status",
@@ -221,9 +219,7 @@ class FluxFill(ControlNode):
             )
 
             # Debug: Log response status and content
-            self.append_value_to_parameter(
-                "status", f"DEBUG - Request Response Status: {response.status_code}\n"
-            )
+            self.append_value_to_parameter("status", f"DEBUG - Request Response Status: {response.status_code}\n")
 
             response.raise_for_status()
         except ConnectTimeout as e:
@@ -247,18 +243,14 @@ class FluxFill(ControlNode):
             raise ValueError(error_msg) from e
 
         result = response.json()
-        self.append_value_to_parameter(
-            "status", f"DEBUG - Request Response: {result}\n"
-        )
+        self.append_value_to_parameter("status", f"DEBUG - Request Response: {result}\n")
 
         if "polling_url" not in result:
             raise ValueError(f"{self.name}: Unexpected response format (missing polling_url): {result}")
 
         return result["polling_url"]
 
-    def _poll_for_result(
-        self, api_key: str, polling_url: str
-    ) -> str:
+    def _poll_for_result(self, api_key: str, polling_url: str) -> str:
         """Poll for the filling result and return the image URL."""
         headers = {"accept": "application/json", "x-key": api_key}
         self.append_value_to_parameter("status", f"Polling URL: {polling_url}\n")
@@ -294,9 +286,7 @@ class FluxFill(ControlNode):
                     )
 
                 # Log detailed status for debugging
-                self.append_value_to_parameter(
-                    "status", f"Attempt {attempt}/{max_attempts}: {status}"
-                )
+                self.append_value_to_parameter("status", f"Attempt {attempt}/{max_attempts}: {status}")
                 if "result" in result and result.get("result") is not None:
                     self.append_value_to_parameter(
                         "status",
@@ -321,27 +311,21 @@ class FluxFill(ControlNode):
 
                     # Try to get more details about why it's stuck
                     if "details" in result and result.get("details"):
-                        self.append_value_to_parameter(
-                            "status", f"API Details: {result.get('details')}\n"
-                        )
+                        self.append_value_to_parameter("status", f"API Details: {result.get('details')}\n")
 
                 if status == "Ready":
                     image_url = result.get("result", {}).get("sample")
                     if not image_url:
                         # Try alternative result field names
-                        alt_url = result.get("result", {}).get("url") or result.get(
-                            "result", {}
-                        ).get("image_url")
+                        alt_url = result.get("result", {}).get("url") or result.get("result", {}).get("image_url")
                         if alt_url:
                             image_url = alt_url
                         else:
-                            self.append_value_to_parameter(
-                                "status", f"Debug - Full API response: {result}\n"
-                            )
+                            self.append_value_to_parameter("status", f"Debug - Full API response: {result}\n")
                             raise ValueError(
                                 f"No image URL found in result. Available keys: {list(result.get('result', {}).keys())}"
                             )
-                    
+
                     return image_url
 
                 elif status in [
@@ -360,7 +344,8 @@ class FluxFill(ControlNode):
                         "status", f"Request was blocked by content moderation: {', '.join(moderation_reasons)}\n"
                     )
                     self.append_value_to_parameter(
-                        "status", "💡 Try: Increase safety_tolerance, use different wording, or avoid restricted content (police, violence, etc.)\n"
+                        "status",
+                        "💡 Try: Increase safety_tolerance, use different wording, or avoid restricted content (police, violence, etc.)\n",
                     )
                     raise ValueError(
                         f"Request blocked by content moderation: {', '.join(moderation_reasons)}. "
@@ -368,15 +353,9 @@ class FluxFill(ControlNode):
                     )
 
                 elif status == "Error" or status == "Failed":
-                    error_details = result.get("result", {}).get(
-                        "error", "Unknown error"
-                    )
-                    self.append_value_to_parameter(
-                        "status", f"API Error Details: {result}\n"
-                    )
-                    raise ValueError(
-                        f"Fill operation failed with status '{status}': {error_details}"
-                    )
+                    error_details = result.get("result", {}).get("error", "Unknown error")
+                    self.append_value_to_parameter("status", f"API Error Details: {result}\n")
+                    raise ValueError(f"Fill operation failed with status '{status}': {error_details}")
 
                 else:
                     # Log unknown status for debugging but continue polling
@@ -387,9 +366,7 @@ class FluxFill(ControlNode):
                     continue
 
             except requests.RequestException as e:
-                self.append_value_to_parameter(
-                    "status", f"Request error on attempt {attempt}: {str(e)}\n"
-                )
+                self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
                 if attempt >= max_attempts:
                     raise
                 continue
@@ -417,9 +394,7 @@ class FluxFill(ControlNode):
 
         return image_bytes
 
-    def _create_image_artifact(
-        self, image_bytes: bytes, output_format: str
-    ) -> ImageUrlArtifact:
+    def _create_image_artifact(self, image_bytes: bytes, output_format: str) -> ImageUrlArtifact:
         """Create ImageUrlArtifact by saving to the project file location."""
         try:
             # Generate descriptive name using model slug and timestamp
@@ -427,17 +402,18 @@ class FluxFill(ControlNode):
             model = "flux-pro-1.0-fill".replace("-", "_")
             artifact_name = f"bfl_{model}_{timestamp}"
 
-            self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n")
+            self.append_value_to_parameter(
+                "status",
+                f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n",
+            )
 
             # Save to project file location and get URL
-            saved = self._output_file.build_file()
-            saved.write_bytes(image_bytes)
+            dest = self._output_file.build_file()
+            saved = dest.write_bytes(image_bytes)
 
             self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
 
-            return ImageUrlArtifact(
-                value=saved.location, name=artifact_name
-            )
+            return ImageUrlArtifact(value=saved.location, name=artifact_name)
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
@@ -446,7 +422,7 @@ class FluxFill(ControlNode):
         try:
             # Poll for result
             image_url = self._poll_for_result(api_key, polling_url)
-            
+
             # Download image immediately to prevent expiration issues
             self.append_value_to_parameter("status", "Downloading filled image...\n")
             image_bytes = self._download_image(image_url)
@@ -466,11 +442,15 @@ class FluxFill(ControlNode):
             self.append_value_to_parameter("status", error_msg)
             raise
 
-    def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as having an incoming connection
         self.incoming_connections[target_parameter.name] = True
 
-    def after_incoming_connection_removed(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection_removed(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as not having an incoming connection
         self.incoming_connections[target_parameter.name] = False
 
@@ -491,7 +471,7 @@ class FluxFill(ControlNode):
         input_image = self.get_parameter_value("input_image")
         if not (input_image or self.incoming_connections.get("input_image", False)):
             errors.append(ValueError(f"{self.name}: Input image is required"))
-            
+
         # Check for mask image
         mask_image = self.get_parameter_value("mask_image")
         if not (mask_image or self.incoming_connections.get("mask_image", False)):
@@ -505,7 +485,6 @@ class FluxFill(ControlNode):
     def process(self) -> AsyncResult[None]:
         """Non-blocking entry point for Griptape engine."""
         yield lambda: self._process()
-        
 
     def _process(self) -> None:
         """Fill masked areas in an image using FLUX.1 Fill API."""
@@ -515,16 +494,12 @@ class FluxFill(ControlNode):
 
             # Get input image and convert to base64
             input_image = self.get_parameter_value("input_image")
-            self.append_value_to_parameter(
-                "status", "Converting input image to base64...\n"
-            )
+            self.append_value_to_parameter("status", "Converting input image to base64...\n")
             input_image_base64 = self._image_to_base64(input_image)
-            
+
             # Get mask image and convert to base64
             mask_image = self.get_parameter_value("mask_image")
-            self.append_value_to_parameter(
-                "status", "Converting mask image to base64...\n"
-            )
+            self.append_value_to_parameter("status", "Converting mask image to base64...\n")
             mask_image_base64 = self._image_to_base64(mask_image)
 
             # Prepare request payload
@@ -547,14 +522,10 @@ class FluxFill(ControlNode):
 
             # Create request
             polling_url = self._create_request(api_key, payload)
-            self.append_value_to_parameter(
-                "status", f"Request created, polling URL: {polling_url}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created, polling URL: {polling_url}\n")
 
             # Poll for result using async pattern
-            self.append_value_to_parameter(
-                "status", "Waiting for fill operation to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for fill operation to complete...\n")
             self._poll_and_process_result(api_key, polling_url, output_format)
 
         except Exception as e:
