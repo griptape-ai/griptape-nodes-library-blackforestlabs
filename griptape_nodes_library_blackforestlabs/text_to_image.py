@@ -1,24 +1,23 @@
 import base64
-import re
 import time
 from typing import Any, Dict, Optional
 
 import requests
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import ConnectTimeout, Timeout
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.exe_types.param_types.parameter_image import ParameterImage
-from griptape_nodes.traits.options import Options
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
-from griptape_nodes.traits.slider import Slider
 from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
+from griptape_nodes.traits.slider import Slider
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
@@ -193,6 +192,13 @@ class TextToImage(ControlNode):
             )
         )
 
+        self._output_file = ProjectFileParameter(
+            self,
+            name="output_file",
+            default_filename="flux_image.png",
+        )
+        self._output_file.add_parameter()
+
         # Output parameters
         self.add_parameter(
             Parameter(
@@ -222,7 +228,7 @@ class TextToImage(ControlNode):
         """Initialize parameter visibility based on default model."""
         default_model = self.get_parameter_value("model") or "flux-pro-1.1"
         is_klein_model = isinstance(default_model, str) and default_model.startswith("flux-2-klein")
-        
+
         if is_klein_model:
             # Klein models don't support prompt_upsampling but do support input_image
             self.hide_parameter_by_name("prompt_upsampling")
@@ -236,9 +242,7 @@ class TextToImage(ControlNode):
         try:
             width_ratio, height_ratio = map(int, aspect_ratio.split(":"))
         except ValueError:
-            raise ValueError(
-                "Invalid aspect ratio format. Expected format 'width:height'."
-            )
+            raise ValueError("Invalid aspect ratio format. Expected format 'width:height'.")
 
         # Ensure max_size is an integer
         if not isinstance(max_size, int):
@@ -270,10 +274,10 @@ class TextToImage(ControlNode):
 
     def _process_input_image(self, image_input: Any) -> Optional[str]:
         """Process input image and convert to base64 data URI.
-        
+
         Args:
             image_input: The input image (can be ImageArtifact, ImageUrlArtifact, str, or None)
-            
+
         Returns:
             Base64 data URI string or None if no input image
         """
@@ -289,10 +293,10 @@ class TextToImage(ControlNode):
 
     def _extract_image_value(self, image_input: Any) -> Optional[str]:
         """Extract string value from various image input types.
-        
+
         Args:
             image_input: The input image (can be ImageArtifact, ImageUrlArtifact, or str)
-            
+
         Returns:
             String value (URL or base64) or None
         """
@@ -318,10 +322,10 @@ class TextToImage(ControlNode):
 
     def _convert_to_base64_data_uri(self, image_value: str) -> Optional[str]:
         """Convert image value to base64 data URI.
-        
+
         Args:
             image_value: URL or base64 string
-            
+
         Returns:
             Base64 data URI string or None
         """
@@ -338,10 +342,10 @@ class TextToImage(ControlNode):
 
     def _download_and_encode_image(self, url: str) -> Optional[str]:
         """Download image from URL and encode as base64 data URI.
-        
+
         Args:
             url: URL of the image to download
-            
+
         Returns:
             Base64 data URI string or None if download fails
         """
@@ -413,6 +417,7 @@ class TextToImage(ControlNode):
             while attempt < max_attempts and image_url is None:
                 # Exponential backoff with jitter similar to Kontext node
                 import random
+
                 sleep_time = min(base_sleep * (2 ** min(attempt // 10, 4)), 10)
                 sleep_time += random.uniform(0, 0.5)
                 time.sleep(sleep_time)
@@ -465,15 +470,11 @@ class TextToImage(ControlNode):
                     elif status in ["Processing", "Queued", "Pending"]:
                         continue
                     else:
-                        raise ValueError(
-                            f"Generation failed with status '{status}': {result}"
-                        )
+                        raise ValueError(f"Generation failed with status '{status}': {result}")
 
                 except requests.RequestException as e:
-                    if not (hasattr(e, 'response') and e.response and e.response.status_code == 500):
-                        self.append_value_to_parameter(
-                            "status", f"Request error on attempt {attempt}: {str(e)}\n"
-                        )
+                    if not (hasattr(e, "response") and e.response and e.response.status_code == 500):
+                        self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
                     if attempt >= max_attempts:
                         raise
 
@@ -484,9 +485,7 @@ class TextToImage(ControlNode):
             image_bytes = self._download_image(image_url)
             image_artifact = self._create_image_artifact(image_bytes, output_format, api_seed)
             self.parameter_output_values["image"] = image_artifact
-            self.append_value_to_parameter(
-                "status", f"✅ Generation completed successfully!\nImage URL: {image_url}\n"
-            )
+            self.append_value_to_parameter("status", f"✅ Generation completed successfully!\nImage URL: {image_url}\n")
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
@@ -505,45 +504,46 @@ class TextToImage(ControlNode):
 
         return image_bytes
 
-    def _create_image_artifact(
-        self, image_bytes: bytes, output_format: str, api_seed: int = None
-    ) -> ImageUrlArtifact:
-        """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
+    def _create_image_artifact(self, image_bytes: bytes, output_format: str, api_seed: int = None) -> ImageUrlArtifact:
+        """Create ImageUrlArtifact by saving to the project file location."""
         try:
-            # Generate descriptive filename using model, seed, and timestamp
+            # Generate descriptive name using model, seed, and timestamp
             model = self.get_parameter_value("model").replace("-", "_")  # Replace hyphens for filename
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-            
-            # Use API seed if available, fallback to user seed, otherwise "random" 
+
+            # Use API seed if available, fallback to user seed, otherwise "random"
             if api_seed is not None:
                 seed_str = str(api_seed)
             else:
                 user_seed = self.get_parameter_value("seed")
                 seed_str = str(user_seed) if user_seed is not None else "random"
-            
-            filename = f"bfl_{model}_{seed_str}_{timestamp}.{output_format.lower()}"
-            
-            self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {filename} ({len(image_bytes)} bytes)\n")
 
-            # Save to managed file location and get URL
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename, ExistingFilePolicy.CREATE_NEW
+            artifact_name = f"bfl_{model}_{seed_str}_{timestamp}"
+
+            self.append_value_to_parameter(
+                "status",
+                f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n",
             )
 
-            # Normalize URL to fix any double slashes (except in protocol)
-            static_url = re.sub(r'(?<!:)//', '/', static_url)
-            
-            self.append_value_to_parameter("status", f"DEBUG - Static URL created: {static_url}\n")
+            # Save to project file location and get URL
+            dest = self._output_file.build_file()
+            saved = dest.write_bytes(image_bytes)
 
-            return ImageUrlArtifact(value=static_url, name=f"bfl_{model}_{seed_str}_{timestamp}")
+            self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
+
+            return ImageUrlArtifact(value=saved.location, name=artifact_name)
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
-    def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as having an incoming connection
         self.incoming_connections[target_parameter.name] = True
 
-    def after_incoming_connection_removed(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection_removed(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as not having an incoming connection
         self.incoming_connections[target_parameter.name] = False
 
@@ -613,9 +613,7 @@ class TextToImage(ControlNode):
                 try:
                     width, height = map(int, image_size.split("x"))
                 except ValueError:
-                    raise ValueError(
-                        "Invalid image size format. Expected format 'widthxheight'."
-                    )
+                    raise ValueError("Invalid image size format. Expected format 'widthxheight'.")
 
                 payload = {
                     "prompt": prompt.strip(),
@@ -644,14 +642,10 @@ class TextToImage(ControlNode):
 
             # Create request
             polling_url = self._create_request(api_key, payload)
-            self.append_value_to_parameter(
-                "status", f"Request created, polling URL: {polling_url}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created, polling URL: {polling_url}\n")
 
             # Poll for result using async pattern
-            self.append_value_to_parameter(
-                "status", "Waiting for generation to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
             self._poll_and_process_result(api_key, polling_url, output_format)
 
         except Exception as e:
@@ -659,9 +653,7 @@ class TextToImage(ControlNode):
             self.append_value_to_parameter("status", error_msg)
             raise
 
-    def after_value_set(
-        self, parameter: Parameter, value: Any
-    ) -> None:
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
         # Check if the updated parameter is aspect_ratio or max_size
         if parameter.name in {"aspect_ratio", "max_size"}:
             # Get current values of aspect_ratio and max_size
@@ -674,11 +666,11 @@ class TextToImage(ControlNode):
             # Set the image_size parameter
             self.set_parameter_value("image_size", image_size)
             self.publish_update_to_parameter("image_size", image_size)
-        
+
         # Handle parameter visibility for Klein models
         if parameter.name == "model":
             is_klein_model = isinstance(value, str) and value.startswith("flux-2-klein")
-            
+
             if is_klein_model:
                 # Klein models don't support prompt_upsampling but do support input_image
                 self.hide_parameter_by_name("prompt_upsampling")

@@ -1,11 +1,8 @@
 import base64
-import re
 import time
 from typing import Any, Dict, Optional
 
 import requests
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import ConnectTimeout, Timeout
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
@@ -13,12 +10,14 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
-from griptape_nodes.traits.options import Options
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
-from griptape_nodes.traits.slider import Slider
+from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
+from griptape_nodes.traits.slider import Slider
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import ConnectTimeout, Timeout
 
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
@@ -204,6 +203,13 @@ class Flux2ImageGeneration(ControlNode):
             )
         )
 
+        self._output_file = ProjectFileParameter(
+            self,
+            name="output_file",
+            default_filename="flux_image.png",
+        )
+        self._output_file.add_parameter()
+
         # Output parameters
         self.add_parameter(
             Parameter(
@@ -250,20 +256,18 @@ class Flux2ImageGeneration(ControlNode):
 
     def _calculate_image_size(self, max_size: int, aspect_ratio: str) -> tuple[int, int]:
         """Calculate width and height from max size and aspect ratio.
-        
+
         Args:
             max_size: Maximum dimension in pixels
             aspect_ratio: Aspect ratio string (e.g., "16:9")
-            
+
         Returns:
             Tuple of (width, height)
         """
         try:
             width_ratio, height_ratio = map(int, aspect_ratio.split(":"))
         except ValueError:
-            raise ValueError(
-                "Invalid aspect ratio format. Expected format 'width:height'."
-            )
+            raise ValueError("Invalid aspect ratio format. Expected format 'width:height'.")
 
         # Ensure max_size is an integer
         if not isinstance(max_size, int):
@@ -315,7 +319,9 @@ class Flux2ImageGeneration(ControlNode):
                     raise ValueError(f"Invalid URL format: {image_artifact}. URL must start with http:// or https://")
                 url = image_artifact
             else:
-                raise ValueError(f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string.")
+                raise ValueError(
+                    f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string."
+                )
 
             # Fetch and encode image from URL
             image_bytes = File(url).read_bytes()
@@ -328,7 +334,7 @@ class Flux2ImageGeneration(ControlNode):
         """Process input images and convert to base64 strings."""
         # Use get_parameter_list_value for ParameterList
         input_images_list = self.get_parameter_list_value("input_images") or []
-        
+
         if not input_images_list:
             return []
 
@@ -339,9 +345,7 @@ class Flux2ImageGeneration(ControlNode):
                     base64_str = self._image_to_base64(image_input)
                     base64_images.append(base64_str)
                 except Exception as e:
-                    self.append_value_to_parameter(
-                        "status", f"Warning: Failed to process input image: {str(e)}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Warning: Failed to process input image: {str(e)}\n")
 
         return base64_images
 
@@ -378,9 +382,7 @@ class Flux2ImageGeneration(ControlNode):
             )
 
             # Debug: Log response status and content
-            self.append_value_to_parameter(
-                "status", f"DEBUG - Request Response Status: {response.status_code}\n"
-            )
+            self.append_value_to_parameter("status", f"DEBUG - Request Response Status: {response.status_code}\n")
 
             response.raise_for_status()
         except ConnectTimeout as e:
@@ -404,18 +406,14 @@ class Flux2ImageGeneration(ControlNode):
             raise ValueError(error_msg) from e
 
         result = response.json()
-        self.append_value_to_parameter(
-            "status", f"DEBUG - Request Response: {result}\n"
-        )
+        self.append_value_to_parameter("status", f"DEBUG - Request Response: {result}\n")
 
         if "polling_url" not in result:
             raise ValueError(f"{self.name}: Unexpected response format (missing polling_url): {result}")
 
         return result["polling_url"]
 
-    def _poll_for_result(
-        self, api_key: str, polling_url: str
-    ) -> tuple[str, Optional[int]]:
+    def _poll_for_result(self, api_key: str, polling_url: str) -> tuple[str, Optional[int]]:
         """Poll for the generation result and return the image URL and seed."""
         headers = {"accept": "application/json", "x-key": api_key}
         self.append_value_to_parameter("status", f"Polling URL: {polling_url}\n")
@@ -451,9 +449,7 @@ class Flux2ImageGeneration(ControlNode):
                     )
 
                 # Log detailed status for debugging
-                self.append_value_to_parameter(
-                    "status", f"Attempt {attempt}/{max_attempts}: {status}"
-                )
+                self.append_value_to_parameter("status", f"Attempt {attempt}/{max_attempts}: {status}")
                 if "result" in result and result.get("result") is not None:
                     self.append_value_to_parameter(
                         "status",
@@ -478,23 +474,17 @@ class Flux2ImageGeneration(ControlNode):
 
                     # Try to get more details about why it's stuck
                     if "details" in result and result.get("details"):
-                        self.append_value_to_parameter(
-                            "status", f"API Details: {result.get('details')}\n"
-                        )
+                        self.append_value_to_parameter("status", f"API Details: {result.get('details')}\n")
 
                 if status == "Ready":
                     image_url = result.get("result", {}).get("sample")
                     if not image_url:
                         # Try alternative result field names
-                        alt_url = result.get("result", {}).get("url") or result.get(
-                            "result", {}
-                        ).get("image_url")
+                        alt_url = result.get("result", {}).get("url") or result.get("result", {}).get("image_url")
                         if alt_url:
                             image_url = alt_url
                         else:
-                            self.append_value_to_parameter(
-                                "status", f"Debug - Full API response: {result}\n"
-                            )
+                            self.append_value_to_parameter("status", f"Debug - Full API response: {result}\n")
                             raise ValueError(
                                 f"No image URL found in result. Available keys: {list(result.get('result', {}).keys())}"
                             )
@@ -521,7 +511,8 @@ class Flux2ImageGeneration(ControlNode):
                         "status", f"Request was blocked by content moderation: {', '.join(moderation_reasons)}\n"
                     )
                     self.append_value_to_parameter(
-                        "status", "💡 Try: Increase safety_tolerance, use different wording, or avoid restricted content\n"
+                        "status",
+                        "💡 Try: Increase safety_tolerance, use different wording, or avoid restricted content\n",
                     )
                     raise ValueError(
                         f"Request blocked by content moderation: {', '.join(moderation_reasons)}. "
@@ -529,15 +520,9 @@ class Flux2ImageGeneration(ControlNode):
                     )
 
                 elif status == "Error" or status == "Failed":
-                    error_details = result.get("result", {}).get(
-                        "error", "Unknown error"
-                    )
-                    self.append_value_to_parameter(
-                        "status", f"API Error Details: {result}\n"
-                    )
-                    raise ValueError(
-                        f"Generation failed with status '{status}': {error_details}"
-                    )
+                    error_details = result.get("result", {}).get("error", "Unknown error")
+                    self.append_value_to_parameter("status", f"API Error Details: {result}\n")
+                    raise ValueError(f"Generation failed with status '{status}': {error_details}")
 
                 else:
                     # Log unknown status for debugging but continue polling
@@ -548,9 +533,7 @@ class Flux2ImageGeneration(ControlNode):
                     continue
 
             except requests.RequestException as e:
-                self.append_value_to_parameter(
-                    "status", f"Request error on attempt {attempt}: {str(e)}\n"
-                )
+                self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
                 if attempt >= max_attempts:
                     raise
                 continue
@@ -581,9 +564,9 @@ class Flux2ImageGeneration(ControlNode):
     def _create_image_artifact(
         self, image_bytes: bytes, output_format: str, api_seed: Optional[int] = None
     ) -> ImageUrlArtifact:
-        """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
+        """Create ImageUrlArtifact by saving to the project file location."""
         try:
-            # Generate descriptive filename using model, seed, and timestamp
+            # Generate descriptive name using model, seed, and timestamp
             model = self.get_parameter_value("model").replace("-", "_")
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
 
@@ -594,21 +577,20 @@ class Flux2ImageGeneration(ControlNode):
                 user_seed = self.get_parameter_value("seed")
                 seed_str = str(user_seed) if user_seed is not None and user_seed != -1 else "random"
 
-            filename = f"bfl_{model}_{seed_str}_{timestamp}.{output_format.lower()}"
+            artifact_name = f"bfl_{model}_{seed_str}_{timestamp}"
 
-            self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {filename} ({len(image_bytes)} bytes)\n")
-
-            # Save to managed file location and get URL
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename, ExistingFilePolicy.CREATE_NEW
+            self.append_value_to_parameter(
+                "status",
+                f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n",
             )
 
-            # Normalize URL to fix any double slashes (except in protocol)
-            static_url = re.sub(r'(?<!:)//', '/', static_url)
+            # Save to project file location and get URL
+            dest = self._output_file.build_file()
+            saved = dest.write_bytes(image_bytes)
 
-            self.append_value_to_parameter("status", f"DEBUG - Static URL created: {static_url}\n")
+            self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
 
-            return ImageUrlArtifact(value=static_url, name=f"bfl_{model}_{seed_str}_{timestamp}")
+            return ImageUrlArtifact(value=saved.location, name=artifact_name)
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
 
@@ -637,11 +619,15 @@ class Flux2ImageGeneration(ControlNode):
             self.append_value_to_parameter("status", error_msg)
             raise
 
-    def after_incoming_connection(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as having an incoming connection
         self.incoming_connections[target_parameter.name] = True
 
-    def after_incoming_connection_removed(self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter) -> None:
+    def after_incoming_connection_removed(
+        self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
+    ) -> None:
         # Mark the parameter as not having an incoming connection
         self.incoming_connections[target_parameter.name] = False
 
@@ -670,15 +656,15 @@ class Flux2ImageGeneration(ControlNode):
                 if guidance_param:
                     guidance_param.ui_options["hide"] = True
                     self.publish_update_to_parameter("guidance", self.get_parameter_value("guidance"))
-        
+
         # Calculate image size when aspect_ratio or max_size changes
         if parameter.name in {"aspect_ratio", "max_size"}:
             aspect_ratio = self.get_parameter_value("aspect_ratio")
             max_size = self.get_parameter_value("max_size")
-            
+
             width, height = self._calculate_image_size(max_size, aspect_ratio)
             image_size = f"{width}x{height}"
-            
+
             self.set_parameter_value("image_size", image_size)
             self.publish_update_to_parameter("image_size", image_size)
 
@@ -735,9 +721,7 @@ class Flux2ImageGeneration(ControlNode):
             try:
                 width, height = map(int, image_size.split("x"))
             except ValueError:
-                raise ValueError(
-                    "Invalid image size format. Expected format 'widthxheight'."
-                )
+                raise ValueError("Invalid image size format. Expected format 'widthxheight'.")
 
             # Build base payload with width/height (not aspect_ratio)
             payload = {
@@ -777,18 +761,13 @@ class Flux2ImageGeneration(ControlNode):
 
             # Create request
             polling_url = self._create_request(api_key, payload)
-            self.append_value_to_parameter(
-                "status", f"Request created, polling URL: {polling_url}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created, polling URL: {polling_url}\n")
 
             # Poll for result using async pattern
-            self.append_value_to_parameter(
-                "status", "Waiting for generation to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
             self._poll_and_process_result(api_key, polling_url, output_format)
 
         except Exception as e:
             error_msg = f"❌ Generation failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
-
