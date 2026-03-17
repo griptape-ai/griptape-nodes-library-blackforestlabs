@@ -1,6 +1,5 @@
 import base64
 import io
-import re
 import time
 from typing import Any, Dict, Optional
 
@@ -15,9 +14,9 @@ from griptape_nodes.exe_types.core_types import (
     ParameterTypeBuiltin,
 )
 from griptape_nodes.exe_types.node_types import ControlNode, BaseNode, AsyncResult
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.files.file import File, FileLoadError
 
 SERVICE = "BlackForest Labs"
@@ -148,6 +147,13 @@ class KontextImageEdit(ControlNode):
                 ui_options={"display_name": "Output Format"},
             )
         )
+
+        self._output_file = ProjectFileParameter(
+            self,
+            parameter_name="output_file",
+            default_value="flux_image.png",
+        )
+        self._output_file.add_input_parameters()
 
         # Output parameters
         self.add_parameter(
@@ -453,35 +459,31 @@ class KontextImageEdit(ControlNode):
     def _create_image_artifact(
         self, image_bytes: bytes, output_format: str, api_seed: int = None
     ) -> ImageUrlArtifact:
-        """Create ImageUrlArtifact using StaticFilesManager for efficient storage."""
+        """Create ImageUrlArtifact by saving to the project file location."""
         try:
-            # Generate descriptive filename using model, seed, and timestamp
+            # Generate descriptive name using model, seed, and timestamp
             model = self.get_parameter_value("model").replace("-", "_")  # Replace hyphens for filename
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-            
-            # Use API seed if available, fallback to user seed, otherwise "random" 
+
+            # Use API seed if available, fallback to user seed, otherwise "random"
             if api_seed is not None:
                 seed_str = str(api_seed)
             else:
                 user_seed = self.get_parameter_value("seed")
                 seed_str = str(user_seed) if user_seed is not None else "random"
-            
-            filename = f"bfl_{model}_{seed_str}_{timestamp}.{output_format.lower()}"
-            
-            self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {filename} ({len(image_bytes)} bytes)\n")
 
-            # Save to managed file location and get URL
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename, ExistingFilePolicy.CREATE_NEW
-            )
+            artifact_name = f"bfl_{model}_{seed_str}_{timestamp}"
 
-            # Normalize URL to fix any double slashes (except in protocol)
-            static_url = re.sub(r'(?<!:)//', '/', static_url)
-            
-            self.append_value_to_parameter("status", f"DEBUG - Static URL created: {static_url}\n")
+            self.append_value_to_parameter("status", f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n")
+
+            # Save to project file location and get URL
+            saved = self._output_file.build_file()
+            saved.write_bytes(image_bytes)
+
+            self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
 
             return ImageUrlArtifact(
-                value=static_url, name=f"bfl_{model}_{seed_str}_{timestamp}"
+                value=saved.location, name=artifact_name
             )
         except Exception as e:
             raise ValueError(f"Failed to create image artifact: {str(e)}")
