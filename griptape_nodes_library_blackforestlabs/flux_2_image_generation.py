@@ -1,6 +1,6 @@
 import base64
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 from griptape.artifacts import ImageUrlArtifact
@@ -12,7 +12,7 @@ from griptape_nodes.exe_types.core_types import (
 )
 from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
-from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
@@ -34,7 +34,7 @@ SAFETY_TOLERANCE_OPTIONS = ["least restrictive", "moderate", "most restrictive"]
 class Flux2ImageGeneration(ControlNode):
     """FLUX 2 image generation node for Pro and Flex models."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         # State to track incoming connections
@@ -349,7 +349,7 @@ class Flux2ImageGeneration(ControlNode):
 
         return base64_images
 
-    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
+    def _create_request(self, api_key: str, payload: dict[str, Any]) -> str:
         """Create a generation request and return the polling URL."""
         headers = {
             "accept": "application/json",
@@ -413,7 +413,7 @@ class Flux2ImageGeneration(ControlNode):
 
         return result["polling_url"]
 
-    def _poll_for_result(self, api_key: str, polling_url: str) -> tuple[str, Optional[int]]:
+    def _poll_for_result(self, api_key: str, polling_url: str) -> tuple[str, int | None]:
         """Poll for the generation result and return the image URL and seed."""
         headers = {"accept": "application/json", "x-key": api_key}
         self.append_value_to_parameter("status", f"Polling URL: {polling_url}\n")
@@ -562,7 +562,7 @@ class Flux2ImageGeneration(ControlNode):
         return image_bytes
 
     def _create_image_artifact(
-        self, image_bytes: bytes, output_format: str, api_seed: Optional[int] = None
+        self, image_bytes: bytes, output_format: str, api_seed: int | None = None
     ) -> ImageUrlArtifact:
         """Create ImageUrlArtifact by saving to the project file location."""
         try:
