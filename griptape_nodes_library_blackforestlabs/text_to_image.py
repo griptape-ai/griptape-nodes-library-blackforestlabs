@@ -1,6 +1,6 @@
 import base64
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import requests
 from griptape.artifacts import ImageUrlArtifact
@@ -12,7 +12,7 @@ from griptape_nodes.exe_types.core_types import (
 from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.exe_types.param_types.parameter_image import ParameterImage
-from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
@@ -27,7 +27,7 @@ BFL_API_BASE_URL = "https://api.bfl.ai"
 class TextToImage(ControlNode):
     """FLUX text-to-image generation node for Klein, Pro, Dev, Ultra, and Kontext models."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         # State to track incoming connections
@@ -272,7 +272,7 @@ class TextToImage(ControlNode):
             )
         return api_key
 
-    def _process_input_image(self, image_input: Any) -> Optional[str]:
+    def _process_input_image(self, image_input: Any) -> str | None:
         """Process input image and convert to base64 data URI.
 
         Args:
@@ -291,7 +291,7 @@ class TextToImage(ControlNode):
 
         return self._convert_to_base64_data_uri(image_value)
 
-    def _extract_image_value(self, image_input: Any) -> Optional[str]:
+    def _extract_image_value(self, image_input: Any) -> str | None:
         """Extract string value from various image input types.
 
         Args:
@@ -320,7 +320,7 @@ class TextToImage(ControlNode):
 
         return None
 
-    def _convert_to_base64_data_uri(self, image_value: str) -> Optional[str]:
+    def _convert_to_base64_data_uri(self, image_value: str) -> str | None:
         """Convert image value to base64 data URI.
 
         Args:
@@ -340,7 +340,7 @@ class TextToImage(ControlNode):
         # Assume it's raw base64 without data URI prefix
         return f"data:image/png;base64,{image_value}"
 
-    def _download_and_encode_image(self, url: str) -> Optional[str]:
+    def _download_and_encode_image(self, url: str) -> str | None:
         """Download image from URL and encode as base64 data URI.
 
         Args:
@@ -357,7 +357,7 @@ class TextToImage(ControlNode):
             self.append_value_to_parameter("status", f"Failed to download image from URL {url}: {e}\n")
             return None
 
-    def _create_request(self, api_key: str, payload: Dict[str, Any]) -> str:
+    def _create_request(self, api_key: str, payload: dict[str, Any]) -> str:
         """Create a generation request and return the polling URL."""
         headers = {
             "accept": "application/json",
