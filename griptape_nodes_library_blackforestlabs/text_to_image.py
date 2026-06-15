@@ -324,7 +324,7 @@ class TextToImage(ControlNode):
         """Convert image value to base64 data URI.
 
         Args:
-            image_value: URL or base64 string
+            image_value: path, URL, or base64 string
 
         Returns:
             Base64 data URI string or None
@@ -333,28 +333,31 @@ class TextToImage(ControlNode):
         if image_value.startswith("data:image/"):
             return image_value
 
-        # If it's a URL, download and convert to base64
-        if image_value.startswith(("http://", "https://")):
-            return self._download_and_encode_image(image_value)
+        # Try to load it as a local path, URL, or macro path via File
+        encoded = self._load_and_encode_image(image_value)
+        if encoded is not None:
+            return encoded
 
         # Assume it's raw base64 without data URI prefix
         return f"data:image/png;base64,{image_value}"
 
-    def _download_and_encode_image(self, url: str) -> str | None:
-        """Download image from URL and encode as base64 data URI.
+    def _load_and_encode_image(self, location: str) -> str | None:
+        """Load an image from a path or URL and encode it as a base64 data URI.
+
+        File resolves local paths, URLs, and macro paths.
 
         Args:
-            url: URL of the image to download
+            location: path or URL of the image to load
 
         Returns:
-            Base64 data URI string or None if download fails
+            Base64 data URI string or None if loading fails
         """
         try:
-            image_bytes = File(url).read_bytes()
+            image_bytes = File(location).read_bytes()
             b64_string = base64.b64encode(image_bytes).decode("utf-8")
             return f"data:image/png;base64,{b64_string}"
         except Exception as e:
-            self.append_value_to_parameter("status", f"Failed to download image from URL {url}: {e}\n")
+            self.append_value_to_parameter("status", f"Failed to load image from {location}: {e}\n")
             return None
 
     def _create_request(self, api_key: str, payload: dict[str, Any]) -> str:

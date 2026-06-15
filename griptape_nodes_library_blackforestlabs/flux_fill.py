@@ -154,7 +154,7 @@ class FluxFill(ControlNode):
         return api_key
 
     def _image_to_base64(self, image_artifact) -> str:
-        """Convert ImageArtifact, ImageUrlArtifact, or URL string to base64 string."""
+        """Convert ImageArtifact, ImageUrlArtifact, or path/URL string to base64 string."""
         try:
             # If it's a standard artifact with to_bytes method
             if hasattr(image_artifact, "to_bytes"):
@@ -162,25 +162,22 @@ class FluxFill(ControlNode):
                     image_bytes = image_artifact.to_bytes()
                     return base64.b64encode(image_bytes).decode("utf-8")
                 except Exception:
-                    # If to_bytes() fails, continue to URL handling
+                    # If to_bytes() fails, continue to path/URL handling
                     pass
 
             # Handle ImageUrlArtifact
             if isinstance(image_artifact, ImageUrlArtifact):
-                url = image_artifact.value
-            # Handle direct URL string
+                location = image_artifact.value
+            # Handle direct path or URL string
             elif isinstance(image_artifact, str):
-                # Validate if string is a proper URL
-                if not (image_artifact.startswith("http://") or image_artifact.startswith("https://")):
-                    raise ValueError(f"Invalid URL format: {image_artifact}. URL must start with http:// or https://")
-                url = image_artifact
+                location = image_artifact
             else:
                 raise ValueError(
-                    f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or URL string."
+                    f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or path/URL string."
                 )
 
-            # Fetch and encode image from URL
-            image_bytes = File(url).read_bytes()
+            # File resolves local paths, URLs, and macro paths
+            image_bytes = File(location).read_bytes()
             return base64.b64encode(image_bytes).decode("utf-8")
 
         except Exception as e:
