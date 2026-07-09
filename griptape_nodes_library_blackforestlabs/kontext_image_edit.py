@@ -10,6 +10,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterTypeBuiltin,
 )
 from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
+from griptape_nodes.exe_types.param_components.model_access_component import ModelAccessComponent
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
@@ -34,16 +35,20 @@ class KontextImageEdit(ControlNode):
         self.incoming_connections = {}
 
         # Input parameters
-        self.add_parameter(
-            Parameter(
-                name="model",
-                tooltip="FLUX.1 Kontext model to use. Pro is faster, Max has higher quality.",
-                type=ParameterTypeBuiltin.STR.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="flux-kontext-pro",
-                traits={Options(choices=["flux-kontext-pro", "flux-kontext-max"])},
-                ui_options={"display_name": "Model"},
-            )
+        model_param = Parameter(
+            name="model",
+            tooltip="FLUX.1 Kontext model to use. Pro is faster, Max has higher quality.",
+            type=ParameterTypeBuiltin.STR.value,
+            allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            default_value="flux-kontext-pro",
+            ui_options={"display_name": "Model"},
+        )
+        self.add_parameter(model_param)
+        self._model_access = ModelAccessComponent(
+            node=self,
+            parameter=model_param,
+            model_choices=["flux-kontext-pro", "flux-kontext-max"],
+            default_model="flux-kontext-pro",
         )
 
         self.add_parameter(
@@ -232,6 +237,8 @@ class KontextImageEdit(ControlNode):
         # Get selected model for API endpoint
         model = self.get_parameter_value("model")
         api_url = f"{BFL_API_BASE_URL}/v1/{model}"
+
+        self._model_access.raise_if_denied(model)
 
         declaration = declare_model_invocation_sync(self, model)
         if declaration.failed():
@@ -504,6 +511,10 @@ class KontextImageEdit(ControlNode):
     ) -> None:
         # Mark the parameter as not having an incoming connection
         self.incoming_connections[target_parameter.name] = False
+
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
+        if parameter.name == "model":
+            self._model_access.on_value_changed(value)
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""

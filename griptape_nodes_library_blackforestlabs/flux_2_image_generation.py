@@ -11,6 +11,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterTypeBuiltin,
 )
 from griptape_nodes.exe_types.node_types import AsyncResult, BaseNode, ControlNode
+from griptape_nodes.exe_types.param_components.model_access_component import ModelAccessComponent
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
@@ -43,16 +44,20 @@ class Flux2ImageGeneration(ControlNode):
         self.incoming_connections = {}
 
         # Model selection
-        self.add_parameter(
-            Parameter(
-                name="model",
-                tooltip="FLUX 2 model to use. Pro is faster, Flex allows more control.",
-                type=ParameterTypeBuiltin.STR.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="flux-2-pro",
-                traits={Options(choices=MODEL_OPTIONS)},
-                ui_options={"display_name": "Model"},
-            )
+        model_param = Parameter(
+            name="model",
+            tooltip="FLUX 2 model to use. Pro is faster, Flex allows more control.",
+            type=ParameterTypeBuiltin.STR.value,
+            allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            default_value="flux-2-pro",
+            ui_options={"display_name": "Model"},
+        )
+        self.add_parameter(model_param)
+        self._model_access = ModelAccessComponent(
+            node=self,
+            parameter=model_param,
+            model_choices=MODEL_OPTIONS,
+            default_model="flux-2-pro",
         )
 
         # Prompt input
@@ -360,6 +365,8 @@ class Flux2ImageGeneration(ControlNode):
         model = self.get_parameter_value("model")
         api_url = f"{BFL_API_BASE_URL}/v1/{model}"
 
+        self._model_access.raise_if_denied(model)
+
         declaration = declare_model_invocation_sync(self, model)
         if declaration.failed():
             details = str(declaration.result_details or f"{self.name}: model invocation was not permitted.")
@@ -639,6 +646,7 @@ class Flux2ImageGeneration(ControlNode):
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
         # Show/hide flex-specific parameters based on model selection
         if parameter.name == "model":
+            self._model_access.on_value_changed(value)
             if value == "flux-2-flex":
                 # Show steps and guidance for flex model
                 steps_param = self.get_parameter_by_name("steps")

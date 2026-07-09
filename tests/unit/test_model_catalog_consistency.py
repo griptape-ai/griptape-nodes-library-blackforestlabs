@@ -3,8 +3,9 @@ library actually serves.
 
 The catalog is the contract the library exposes to the platform (policy, key
 support, UI grouping). Each node carries its served model list statically in
-Python -- either as literal `Options(choices=[...])` values on the "model"
-parameter, a module-level constant referenced from that trait, or (for
+Python -- either as the `model_choices` a `ModelAccessComponent` decorates the
+"model" parameter's dropdown with, a literal `Options(choices=[...])` trait
+for nodes that don't gate the dropdown through the component, or (for
 `FluxFill`) a single fixed provider model id with no dropdown at all. The
 catalog and the served models must agree, and these tests are the guard that
 keeps them from drifting.
@@ -76,14 +77,33 @@ def _top_level_constants(tree: ast.Module) -> dict[str, Any]:
 
 
 def _model_choices_from_source(file_path: Path, *, param_name: str = "model") -> list[str]:
-    """Extract the `Options(choices=...)` list on a node's model Parameter.
+    """Extract the model choices a node's model Parameter offers.
 
-    Finds the `Parameter(name=param_name, ...)` call, reads the `Options`
-    trait's `choices` argument, and resolves it to a literal list -- whether
-    it's written inline or as a reference to a module-level constant.
+    Handles both ways a node can serve its dropdown list:
+
+    - `ModelAccessComponent(parameter=..., model_choices=..., ...)`: the
+      license-policy helper owns the `Options` trait, so the choices live in
+      the component constructor's `model_choices` argument.
+    - `Parameter(name=param_name, traits={Options(choices=...)})`: the plain
+      trait, for nodes that don't gate the dropdown through the component.
+
+    Either way, `choices`/`model_choices` may be written inline or as a
+    reference to a module-level constant; both are resolved to a literal list.
     """
     tree = ast.parse(file_path.read_text())
     constants = _top_level_constants(tree)
+
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id != "ModelAccessComponent":
+            continue
+        choices_kwarg = next((kw for kw in node.keywords if kw.arg == "model_choices"), None)
+        if choices_kwarg is None:
+            continue
+        if isinstance(choices_kwarg.value, ast.Name):
+            return list(constants[choices_kwarg.value.id])
+        return list(ast.literal_eval(choices_kwarg.value))
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -111,7 +131,7 @@ def _model_choices_from_source(file_path: Path, *, param_name: str = "model") ->
                 return list(constants[choices_kwarg.value.id])
             return list(ast.literal_eval(choices_kwarg.value))
 
-    msg = f"Could not find an Options(choices=...) trait for parameter '{param_name}' in {file_path}"
+    msg = f"Could not find model choices for parameter '{param_name}' in {file_path}"
     raise AssertionError(msg)
 
 
