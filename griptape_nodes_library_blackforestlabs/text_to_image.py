@@ -19,6 +19,8 @@ from griptape_nodes.traits.slider import Slider
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ConnectTimeout, Timeout
 
+from griptape_nodes_library_blackforestlabs.utils.model_invocation import declare_model_invocation_sync
+
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
 BFL_API_BASE_URL = "https://api.bfl.ai"
@@ -371,6 +373,12 @@ class TextToImage(ControlNode):
         # Get selected model for API endpoint
         model = self.get_parameter_value("model")
         api_url = f"{BFL_API_BASE_URL}/v1/{model}"
+
+        declaration = declare_model_invocation_sync(self, model)
+        if declaration.failed():
+            details = str(declaration.result_details or f"{self.name}: model invocation was not permitted.")
+            self.append_value_to_parameter("status", f"❌ Generation failed: {details}\n")
+            raise RuntimeError(details)
 
         try:
             response = requests.post(

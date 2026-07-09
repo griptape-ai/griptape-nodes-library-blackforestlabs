@@ -17,9 +17,12 @@ from griptape_nodes.traits.options import Options
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ConnectTimeout, Timeout
 
+from griptape_nodes_library_blackforestlabs.utils.model_invocation import declare_model_invocation_sync
+
 SERVICE = "BlackForest Labs"
 API_KEY_ENV_VAR = "BFL_API_KEY"
 BFL_API_BASE_URL = "https://api.bfl.ai"
+FIXED_MODEL = "flux-pro-1.0-fill"
 
 
 class FluxFill(ControlNode):
@@ -191,7 +194,13 @@ class FluxFill(ControlNode):
             "Content-Type": "application/json",
         }
 
-        api_url = f"{BFL_API_BASE_URL}/v1/flux-pro-1.0-fill"
+        api_url = f"{BFL_API_BASE_URL}/v1/{FIXED_MODEL}"
+
+        declaration = declare_model_invocation_sync(self, FIXED_MODEL)
+        if declaration.failed():
+            details = str(declaration.result_details or f"{self.name}: model invocation was not permitted.")
+            self.append_value_to_parameter("status", f"❌ Fill operation failed: {details}\n")
+            raise RuntimeError(details)
 
         # Debug: Log the request details (without sensitive data)
         debug_payload = payload.copy()
@@ -394,7 +403,7 @@ class FluxFill(ControlNode):
         try:
             # Generate descriptive name using model slug and timestamp
             timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
-            model = "flux-pro-1.0-fill".replace("-", "_")
+            model = FIXED_MODEL.replace("-", "_")
             artifact_name = f"bfl_{model}_{timestamp}"
 
             self.append_value_to_parameter(
