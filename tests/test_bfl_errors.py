@@ -260,3 +260,32 @@ def test_a_node_file_loads_the_way_the_engine_loads_it(
     spec.loader.exec_module(module)
 
     assert hasattr(module, class_name)
+
+
+@pytest.mark.parametrize(("module_name", "class_name"), NODES)
+def test_the_check_before_the_flow_starts_covers_only_the_api_key(module_name: str, class_name: str) -> None:
+    """A problem found before the flow starts shows as a toast, with no error on any node's header."""
+    module, node = _load(module_name, class_name)
+
+    with patch.object(module, "GriptapeNodes") as engine:
+        engine.SecretsManager.return_value.get_secret.return_value = None
+        errors = node.validate_before_workflow_run()
+
+    assert errors is not None
+    assert len(errors) == 1
+    assert "BFL_API_KEY" in str(errors[0])
+
+
+@pytest.mark.parametrize(("module_name", "class_name"), NODES)
+def test_missing_inputs_are_reported_when_the_node_runs(module_name: str, class_name: str) -> None:
+    """Inputs can come from upstream nodes, so they are checked when the node runs, where the header shows them."""
+    module, node = _load(module_name, class_name)
+
+    with patch.object(module, "GriptapeNodes") as engine:
+        engine.SecretsManager.return_value.get_secret.return_value = "key"
+        before_flow = node.validate_before_workflow_run()
+        when_run = node.validate_before_node_run()
+
+    assert before_flow is None
+    assert when_run
+    assert all(isinstance(error, NodeError) for error in when_run)
