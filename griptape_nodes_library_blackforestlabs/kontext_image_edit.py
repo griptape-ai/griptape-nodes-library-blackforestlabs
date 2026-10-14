@@ -3,6 +3,13 @@ import time
 from typing import Any
 
 import requests
+from bfl_errors import (
+    API_KEY_ENV_VAR,
+    missing_api_key_error,
+    request_error,
+    result_error,
+    unexpected_response_error,
+)
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     NodeError,
@@ -17,14 +24,6 @@ from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ConnectTimeout, Timeout
-
-from griptape_nodes_library_blackforestlabs.bfl_errors import (
-    API_KEY_ENV_VAR,
-    missing_api_key_error,
-    request_error,
-    result_error,
-    unexpected_response_error,
-)
 
 SERVICE = "BlackForest Labs"
 BFL_API_BASE_URL = "https://api.bfl.ai"

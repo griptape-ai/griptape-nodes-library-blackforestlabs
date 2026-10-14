@@ -52,6 +52,8 @@ venv = ".venv"
 include = ["."]
 exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates"]
 pythonVersion = "3.12"
+# The engine puts the library folder on sys.path, so the nodes import their sibling modules by bare name.
+extraPaths = ["griptape_nodes_library_blackforestlabs"]
 reportIncompatibleMethodOverride = false
 reportMissingImports = false
 reportMissingModuleSource = false
@@ -59,3 +61,7 @@ reportAttributeAccessIssue = false
 reportArgumentType = false
 reportCallIssue = false
 reportReturnType = false
+
+[tool.pytest.ini_options]
+# Match the engine: the library folder is on sys.path when it loads a node file.
+pythonpath = ["griptape_nodes_library_blackforestlabs"]

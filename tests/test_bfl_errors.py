@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
+import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from griptape_nodes.exe_types.core_types import NodeError
-
-from griptape_nodes_library_blackforestlabs.bfl_errors import (
+from bfl_errors import (
     missing_api_key_error,
     request_error,
     result_error,
     unexpected_response_error,
 )
+from griptape_nodes.exe_types.core_types import NodeError
 
 NODES = [
     ("flux_fill", "FluxFill"),
@@ -149,7 +151,7 @@ def test_unexpected_response_error_with_nothing_to_attach() -> None:
 
 @pytest.mark.parametrize(("module_name", "class_name"), NODES)
 def test_validation_reports_each_problem_without_the_node_name(module_name: str, class_name: str) -> None:
-    module = importlib.import_module(f"griptape_nodes_library_blackforestlabs.{module_name}")
+    module = importlib.import_module(module_name)
     node = getattr(module, class_name)(name="Some Node")
 
     with patch.object(module, "GriptapeNodes") as engine:
@@ -165,7 +167,7 @@ def test_validation_reports_each_problem_without_the_node_name(module_name: str,
 
 
 def _load(module_name: str, class_name: str) -> tuple[Any, Any]:
-    module = importlib.import_module(f"griptape_nodes_library_blackforestlabs.{module_name}")
+    module = importlib.import_module(module_name)
     return module, getattr(module, class_name)(name="Some Node")
 
 
@@ -233,3 +235,28 @@ def test_a_failed_request_fails_the_node_with_its_reason(module_name: str, class
 
     assert str(raised.value) == "Black Forest Labs could not finish the request: The input image could not be decoded."
     assert raised.value.response == result
+
+
+LIBRARY_DIR = Path(__file__).resolve().parent.parent / "griptape_nodes_library_blackforestlabs"
+
+
+@pytest.mark.parametrize(("module_name", "class_name"), NODES)
+def test_a_node_file_loads_the_way_the_engine_loads_it(
+    module_name: str, class_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The engine loads each node file on its own, with the library folder on sys.path.
+
+    There is no parent package, and the library's package name is not importable there, so a node
+    has to import its sibling modules by bare name. The dev environment installs the project, which
+    would hide a package-name import, so make the package unimportable here.
+    """
+    monkeypatch.syspath_prepend(str(LIBRARY_DIR))
+    monkeypatch.setitem(sys.modules, "griptape_nodes_library_blackforestlabs", None)
+
+    spec = importlib.util.spec_from_file_location(f"engine_loaded_{module_name}", LIBRARY_DIR / f"{module_name}.py")
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert hasattr(module, class_name)
