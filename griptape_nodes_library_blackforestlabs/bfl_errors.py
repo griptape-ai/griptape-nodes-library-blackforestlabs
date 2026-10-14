@@ -37,18 +37,27 @@ _HTTP_STATUS_REASONS = {
 _KEY_REJECTED_STATUSES = (401, 403)
 
 
-def _key_links() -> list[NodeErrorLink]:
+def _key_links(label: str) -> list[NodeErrorLink]:
     return [
-        NodeErrorLink(label="Add the API key", url=f"#settings-secrets?filter={quote(API_KEY_ENV_VAR)}"),
+        NodeErrorLink(label=label, url=f"#settings-secrets?filter={quote(API_KEY_ENV_VAR)}"),
         NodeErrorLink(label="Get a Black Forest Labs API key", url=API_KEY_URL),
     ]
+
+
+def _key_refused(status_code: int, reason: str | None) -> bool:
+    """Whether the API refused the request over the API key, which the user can fix in Settings.
+
+    A well-formed key the API doesn't know gets a 401 or 403. A malformed one gets a 422 with the
+    detail "Invalid API key format", so the status alone isn't enough.
+    """
+    return status_code in _KEY_REJECTED_STATUSES or (reason is not None and "api key" in reason.lower())
 
 
 def missing_api_key_error() -> NodeError:
     """The error for a run with no Black Forest Labs API key, linking to the secret in Settings."""
     return NodeError(
         f"{API_KEY_ENV_VAR} is not set. Add it in Settings → API Keys & Secrets, then run the node again.",
-        links=_key_links(),
+        links=_key_links("Add the API key"),
     )
 
 
@@ -59,10 +68,11 @@ def request_error(error: requests.RequestException) -> NodeError:
         return NodeError(f"Could not reach Black Forest Labs: {error}")
 
     body = _json_body(response)
-    reason = _api_reason(body) or _HTTP_STATUS_REASONS.get(
+    api_reason = _api_reason(body)
+    reason = api_reason or _HTTP_STATUS_REASONS.get(
         response.status_code, f"Black Forest Labs returned an error (HTTP {response.status_code})."
     )
-    links = _key_links() if response.status_code in _KEY_REJECTED_STATUSES else None
+    links = _key_links("Update the API key") if _key_refused(response.status_code, api_reason) else None
     return NodeError(reason, fields={"status_code": response.status_code}, response=body, links=links)
 
 

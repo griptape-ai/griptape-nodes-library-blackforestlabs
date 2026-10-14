@@ -86,12 +86,25 @@ def test_request_error_without_a_reason_describes_the_status(status: int, expect
     assert error.response is None
 
 
-@pytest.mark.parametrize("status", [401, 403])
-def test_a_rejected_key_links_to_the_secret(status: int) -> None:
-    error = request_error(_http_error(status, body={"detail": "Not authenticated"}))
+@pytest.mark.parametrize(
+    ("status", "detail"),
+    [(403, "Not authenticated"), (401, "Not authenticated"), (422, "Invalid API key format")],
+)
+def test_a_refused_key_links_to_the_secret(status: int, detail: str) -> None:
+    """BFL answers a well-formed unknown key with 403, and a malformed key with 422."""
+    error = request_error(_http_error(status, body={"detail": detail}))
 
-    assert str(error) == "Not authenticated"
-    assert error.links[0].url == "#settings-secrets?filter=BFL_API_KEY"
+    assert str(error) == detail
+    assert [(link.label, link.url) for link in error.links] == [
+        ("Update the API key", "#settings-secrets?filter=BFL_API_KEY"),
+        ("Get a Black Forest Labs API key", "https://dashboard.bfl.ai/api/keys"),
+    ]
+
+
+def test_a_validation_problem_that_is_not_about_the_key_has_no_key_links() -> None:
+    body = {"detail": [{"loc": ["body", "width"], "msg": "Input should be a multiple of 32"}]}
+
+    assert request_error(_http_error(422, body=body)).links == []
 
 
 def test_request_error_without_a_response_says_the_api_could_not_be_reached() -> None:
@@ -289,3 +302,17 @@ def test_missing_inputs_are_reported_when_the_node_runs(module_name: str, class_
     assert before_flow is None
     assert when_run
     assert all(isinstance(error, NodeError) for error in when_run)
+
+
+@pytest.mark.parametrize(("module_name", "class_name"), NODES)
+def test_a_malformed_key_when_creating_the_request_links_to_the_secret(module_name: str, class_name: str) -> None:
+    module, node = _load(module_name, class_name)
+    response = MagicMock()
+    response.raise_for_status.side_effect = _http_error(422, body={"detail": "Invalid API key format"})
+
+    with patch.object(module.requests, "post", return_value=response), pytest.raises(NodeError) as raised:
+        node._create_request("key", {})
+
+    assert str(raised.value) == "Invalid API key format"
+    assert raised.value.fields == {"status_code": 422}
+    assert raised.value.links[0].url == "#settings-secrets?filter=BFL_API_KEY"
