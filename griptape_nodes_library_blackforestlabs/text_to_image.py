@@ -5,6 +5,7 @@ from typing import Any
 import requests
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
+    NodeError,
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
@@ -19,8 +20,15 @@ from griptape_nodes.traits.slider import Slider
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ConnectTimeout, Timeout
 
+from griptape_nodes_library_blackforestlabs.bfl_errors import (
+    API_KEY_ENV_VAR,
+    missing_api_key_error,
+    request_error,
+    result_error,
+    unexpected_response_error,
+)
+
 SERVICE = "BlackForest Labs"
-API_KEY_ENV_VAR = "BFL_API_KEY"
 BFL_API_BASE_URL = "https://api.bfl.ai"
 
 
@@ -266,10 +274,7 @@ class TextToImage(ControlNode):
         """Retrieve the BFL API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
-            raise ValueError(
-                f"BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://docs.bfl.ml/"
-            )
+            raise missing_api_key_error()
         return api_key
 
     def _process_input_image(self, image_input: Any) -> str | None:
@@ -382,27 +387,29 @@ class TextToImage(ControlNode):
             response.raise_for_status()
         except ConnectTimeout as e:
             error_msg = (
-                f"{self.name}: Connection to BlackForest Labs API timed out after 60 seconds. "
-                f"This may indicate network connectivity issues or the API may be temporarily unavailable. "
-                f"Please check your internet connection and try again."
+                "Connection to BlackForest Labs API timed out after 60 seconds. "
+                "This may indicate network connectivity issues or the API may be temporarily unavailable. "
+                "Please check your internet connection and try again."
             )
-            raise ValueError(error_msg) from e
+            raise NodeError(error_msg) from e
         except Timeout as e:
             error_msg = (
-                f"{self.name}: Request to BlackForest Labs API timed out after 60 seconds. "
-                f"The API may be experiencing high load. Please try again later."
+                "Request to BlackForest Labs API timed out after 60 seconds. "
+                "The API may be experiencing high load. Please try again later."
             )
-            raise ValueError(error_msg) from e
+            raise NodeError(error_msg) from e
         except RequestsConnectionError as e:
             error_msg = (
-                f"{self.name}: Failed to connect to BlackForest Labs API at {api_url}. "
+                f"Failed to connect to BlackForest Labs API at {api_url}. "
                 f"This may indicate network connectivity issues. Error: {e!s}"
             )
-            raise ValueError(error_msg) from e
+            raise NodeError(error_msg) from e
+        except requests.HTTPError as e:
+            raise request_error(e) from e
 
         result = response.json()
         if "polling_url" not in result:
-            raise ValueError(f"{self.name}: Unexpected response format (missing polling_url): {result}")
+            raise unexpected_response_error("Black Forest Labs did not return a polling URL for the request.", result)
 
         return result["polling_url"]
 
@@ -440,10 +447,11 @@ class TextToImage(ControlNode):
                             "status", f"Attempt {attempt}: Server error (500) - #{consecutive_500_errors} consecutive\n"
                         )
                         if consecutive_500_errors >= 10:
-                            raise ValueError(
+                            raise NodeError(
                                 "API appears to have persistent server issues (10+ consecutive 500 errors). "
                                 f"This may be a problem with the {self.get_parameter_value('model')} model endpoint. "
-                                "Try a different model or retry later."
+                                "Try a different model or retry later.",
+                                fields={"status_code": 500},
                             )
                         continue
                     elif response.status_code == 429:
@@ -464,7 +472,9 @@ class TextToImage(ControlNode):
                     if status == "Ready":
                         image_url = result.get("result", {}).get("sample")
                         if not image_url:
-                            raise ValueError(f"No image URL in result: {result}")
+                            raise unexpected_response_error(
+                                "Black Forest Labs finished the request but returned no image URL.", result
+                            )
 
                         api_seed = result.get("result", {}).get("seed")
                         if api_seed:
@@ -473,13 +483,13 @@ class TextToImage(ControlNode):
                     elif status in ["Processing", "Queued", "Pending"]:
                         continue
                     else:
-                        raise ValueError(f"Generation failed with status '{status}': {result}")
+                        raise result_error(result)
 
                 except requests.RequestException as e:
                     if not (hasattr(e, "response") and e.response and e.response.status_code == 500):
                         self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
                     if attempt >= max_attempts:
-                        raise
+                        raise request_error(e) from e
 
             if image_url is None:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
@@ -509,34 +519,31 @@ class TextToImage(ControlNode):
 
     def _create_image_artifact(self, image_bytes: bytes, output_format: str, api_seed: int = None) -> ImageUrlArtifact:
         """Create ImageUrlArtifact by saving to the project file location."""
-        try:
-            # Generate descriptive name using model, seed, and timestamp
-            model = self.get_parameter_value("model").replace("-", "_")  # Replace hyphens for filename
-            timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+        # Generate descriptive name using model, seed, and timestamp
+        model = self.get_parameter_value("model").replace("-", "_")  # Replace hyphens for filename
+        timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
 
-            # Use API seed if available, fallback to user seed, otherwise "random"
-            if api_seed is not None:
-                seed_str = str(api_seed)
-            else:
-                user_seed = self.get_parameter_value("seed")
-                seed_str = str(user_seed) if user_seed is not None else "random"
+        # Use API seed if available, fallback to user seed, otherwise "random"
+        if api_seed is not None:
+            seed_str = str(api_seed)
+        else:
+            user_seed = self.get_parameter_value("seed")
+            seed_str = str(user_seed) if user_seed is not None else "random"
 
-            artifact_name = f"bfl_{model}_{seed_str}_{timestamp}"
+        artifact_name = f"bfl_{model}_{seed_str}_{timestamp}"
 
-            self.append_value_to_parameter(
-                "status",
-                f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n",
-            )
+        self.append_value_to_parameter(
+            "status",
+            f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n",
+        )
 
-            # Save to project file location and get URL
-            dest = self._output_file.build_file()
-            saved = dest.write_bytes(image_bytes)
+        # Save to project file location and get URL
+        dest = self._output_file.build_file()
+        saved = dest.write_bytes(image_bytes)
 
-            self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
+        self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
 
-            return ImageUrlArtifact(value=saved.location, name=artifact_name)
-        except Exception as e:
-            raise ValueError(f"Failed to create image artifact: {str(e)}")
+        return ImageUrlArtifact(value=saved.location, name=artifact_name)
 
     def after_incoming_connection(
         self, source_node: BaseNode, source_parameter: Parameter, target_parameter: Parameter
@@ -557,23 +564,17 @@ class TextToImage(ControlNode):
         # Check for prompt
         prompt = self.get_parameter_value("prompt")
         if not (prompt or self.incoming_connections.get("prompt", False)):
-            errors.append(
-                ValueError(f"{self.name}: Provide a prompt or make a connection to the prompt parameter in this node.")
-            )
+            errors.append(NodeError("'Prompt' is empty. Enter a prompt or connect one to it."))
 
         # Check for API key
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
-            errors.append(
-                ValueError(
-                    f"{self.name}: BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
-                )
-            )
+            errors.append(missing_api_key_error())
 
         # Validate seed if provided
         seed = self.get_parameter_value("seed")
         if seed is not None and not isinstance(seed, int):
-            errors.append(ValueError(f"{self.name}: Seed must be an integer"))
+            errors.append(NodeError("'Seed' must be a whole number."))
 
         return errors if errors else None
 
@@ -596,7 +597,7 @@ class TextToImage(ControlNode):
 
             prompt = self.get_parameter_value("prompt")
             if not prompt:
-                raise ValueError("Prompt is required and cannot be empty")
+                raise NodeError("'Prompt' is empty. Enter a prompt or connect one to it.")
 
             model = self.get_parameter_value("model")
 
