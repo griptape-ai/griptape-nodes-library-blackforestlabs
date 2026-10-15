@@ -495,12 +495,11 @@ class KontextImageEdit(ControlNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
-        errors = []
+        # Without a key nothing can run, so it is the only problem reported.
+        if not GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR):
+            return [missing_api_key_error()]
 
-        # Check for API key
-        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
-        if not api_key:
-            errors.append(missing_api_key_error())
+        errors = []
 
         # Check for input image
         input_image = self.get_parameter_value("input_image")

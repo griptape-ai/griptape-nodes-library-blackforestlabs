@@ -558,17 +558,16 @@ class TextToImage(ControlNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
+        # Without a key nothing can run, so it is the only problem reported.
+        if not GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR):
+            return [missing_api_key_error()]
+
         errors = []
 
         # Check for prompt
         prompt = self.get_parameter_value("prompt")
         if not (prompt or self.incoming_connections.get("prompt", False)):
             errors.append(NodeError("'Prompt' is empty. Enter a prompt or connect one to it."))
-
-        # Check for API key
-        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
-        if not api_key:
-            errors.append(missing_api_key_error())
 
         # Validate seed if provided
         seed = self.get_parameter_value("seed")

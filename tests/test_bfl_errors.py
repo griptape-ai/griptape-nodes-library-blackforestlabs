@@ -163,7 +163,7 @@ def test_unexpected_response_error_with_nothing_to_attach() -> None:
 
 
 @pytest.mark.parametrize(("module_name", "class_name"), NODES)
-def test_validation_reports_each_problem_without_the_node_name(module_name: str, class_name: str) -> None:
+def test_a_missing_key_is_the_only_problem_reported_and_names_no_node(module_name: str, class_name: str) -> None:
     module = importlib.import_module(module_name)
     node = getattr(module, class_name)(name="Some Node")
 
@@ -171,12 +171,12 @@ def test_validation_reports_each_problem_without_the_node_name(module_name: str,
         engine.SecretsManager.return_value.get_secret.return_value = None
         errors = node.validate_before_node_run()
 
-    assert errors
-    assert all(isinstance(error, NodeError) for error in errors)
-    assert all("Some Node" not in str(error) for error in errors)
-    key_errors = [error for error in errors if "BFL_API_KEY" in str(error)]
-    assert len(key_errors) == 1
-    assert key_errors[0].links[0].url == "#settings-secrets?filter=BFL_API_KEY"
+    assert errors is not None
+    assert len(errors) == 1
+    assert isinstance(errors[0], NodeError)
+    assert "Some Node" not in str(errors[0])
+    assert "BFL_API_KEY" in str(errors[0])
+    assert errors[0].links[0].url == "#settings-secrets?filter=BFL_API_KEY"
 
 
 def _load(module_name: str, class_name: str) -> tuple[Any, Any]:
@@ -300,9 +300,9 @@ def test_a_missing_key_is_reported_when_the_node_runs_with_a_link_to_the_secret(
         engine.SecretsManager.return_value.get_secret.return_value = None
         errors = node.validate_before_node_run()
 
-    key_errors = [error for error in errors or [] if "BFL_API_KEY" in str(error)]
-    assert len(key_errors) == 1
-    assert key_errors[0].links[0].url == "#settings-secrets?filter=BFL_API_KEY"
+    assert errors is not None
+    assert len(errors) == 1
+    assert errors[0].links[0].url == "#settings-secrets?filter=BFL_API_KEY"
 
 
 @pytest.mark.parametrize(("module_name", "class_name"), NODES)
