@@ -1,6 +1,6 @@
 [project]
 name = "griptape_nodes_library_blackforestlabs"
-version = "0.2.1"
+version = "0.3.0"
 description = "Griptape Nodes for Black Forest Labs"
 authors = [
     {name = "Your Name",email = "you@example.com"}
@@ -18,7 +18,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = ["pyright>=1.1.396", "pytest-asyncio>=0.21.0", "ruff>=0.8.0", "pytest", "griptape-nodes-engine"]
+dev = ["pyright>=1.1.396", "pytest-asyncio>=0.21.0", "ruff>=0.8.0", "pytest", "griptape-nodes-engine>=0.104.0"]
 
 [tool.ruff]
 line-length = 120
@@ -52,6 +52,8 @@ venv = ".venv"
 include = ["."]
 exclude = [".venv", "**/node_modules", "**/__pycache__", "**/.*", "templates"]
 pythonVersion = "3.12"
+# The engine puts the library folder on sys.path, so the nodes import their sibling modules by bare name.
+extraPaths = ["griptape_nodes_library_blackforestlabs"]
 reportIncompatibleMethodOverride = false
 reportMissingImports = false
 reportMissingModuleSource = false
@@ -59,3 +61,7 @@ reportAttributeAccessIssue = false
 reportArgumentType = false
 reportCallIssue = false
 reportReturnType = false
+
+[tool.pytest.ini_options]
+# Match the engine: the library folder is on sys.path when it loads a node file.
+pythonpath = ["griptape_nodes_library_blackforestlabs"]

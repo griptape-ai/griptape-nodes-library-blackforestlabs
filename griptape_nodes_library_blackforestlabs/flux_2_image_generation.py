@@ -3,8 +3,16 @@ import time
 from typing import Any
 
 import requests
+from bfl_errors import (
+    API_KEY_ENV_VAR,
+    missing_api_key_error,
+    request_error,
+    result_error,
+    unexpected_response_error,
+)
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
+    NodeError,
     Parameter,
     ParameterList,
     ParameterMode,
@@ -20,7 +28,6 @@ from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import ConnectTimeout, Timeout
 
 SERVICE = "BlackForest Labs"
-API_KEY_ENV_VAR = "BFL_API_KEY"
 BFL_API_BASE_URL = "https://api.bfl.ai"
 
 # Constants
@@ -291,41 +298,35 @@ class Flux2ImageGeneration(ControlNode):
         """Retrieve the BFL API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
-            raise ValueError(
-                f"BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://docs.bfl.ml/"
-            )
+            raise missing_api_key_error()
         return api_key
 
     def _image_to_base64(self, image_artifact) -> str:
         """Convert ImageArtifact, ImageUrlArtifact, or path/URL string to base64 string."""
-        try:
-            # If it's a standard artifact with to_bytes method
-            if hasattr(image_artifact, "to_bytes"):
-                try:
-                    image_bytes = image_artifact.to_bytes()
-                    return base64.b64encode(image_bytes).decode("utf-8")
-                except Exception:
-                    # If to_bytes() fails, continue to path/URL handling
-                    pass
+        # If it's a standard artifact with to_bytes method
+        if hasattr(image_artifact, "to_bytes"):
+            try:
+                image_bytes = image_artifact.to_bytes()
+                return base64.b64encode(image_bytes).decode("utf-8")
+            except Exception:
+                # If to_bytes() fails, continue to path/URL handling
+                pass
 
-            # Handle ImageUrlArtifact
-            if isinstance(image_artifact, ImageUrlArtifact):
-                location = image_artifact.value
-            # Handle direct path or URL string
-            elif isinstance(image_artifact, str):
-                location = image_artifact
-            else:
-                raise ValueError(
-                    f"Unsupported input type: {type(image_artifact).__name__}. Expected ImageArtifact, ImageUrlArtifact, or path/URL string."
-                )
+        # Handle ImageUrlArtifact
+        if isinstance(image_artifact, ImageUrlArtifact):
+            location = image_artifact.value
+        # Handle direct path or URL string
+        elif isinstance(image_artifact, str):
+            location = image_artifact
+        else:
+            raise NodeError(
+                f"Unsupported input type: {type(image_artifact).__name__}. "
+                "Expected ImageArtifact, ImageUrlArtifact, or path/URL string."
+            )
 
-            # File resolves local paths, URLs, and macro paths
-            image_bytes = File(location).read_bytes()
-            return base64.b64encode(image_bytes).decode("utf-8")
-
-        except Exception as e:
-            raise ValueError(f"Failed to convert image to base64: {str(e)}")
+        # File resolves local paths, URLs, and macro paths. Its error says which file failed and why.
+        image_bytes = File(location).read_bytes()
+        return base64.b64encode(image_bytes).decode("utf-8")
 
     def _process_input_images(self) -> list[str]:
         """Process input images and convert to base64 strings."""
@@ -384,29 +385,31 @@ class Flux2ImageGeneration(ControlNode):
             response.raise_for_status()
         except ConnectTimeout as e:
             error_msg = (
-                f"{self.name}: Connection to BlackForest Labs API timed out after 60 seconds. "
-                f"This may indicate network connectivity issues or the API may be temporarily unavailable. "
-                f"Please check your internet connection and try again."
+                "Connection to BlackForest Labs API timed out after 60 seconds. "
+                "This may indicate network connectivity issues or the API may be temporarily unavailable. "
+                "Please check your internet connection and try again."
             )
-            raise ValueError(error_msg) from e
+            raise NodeError(error_msg) from e
         except Timeout as e:
             error_msg = (
-                f"{self.name}: Request to BlackForest Labs API timed out after 60 seconds. "
-                f"The API may be experiencing high load. Please try again later."
+                "Request to BlackForest Labs API timed out after 60 seconds. "
+                "The API may be experiencing high load. Please try again later."
             )
-            raise ValueError(error_msg) from e
+            raise NodeError(error_msg) from e
         except RequestsConnectionError as e:
             error_msg = (
-                f"{self.name}: Failed to connect to BlackForest Labs API at {api_url}. "
+                f"Failed to connect to BlackForest Labs API at {api_url}. "
                 f"This may indicate network connectivity issues. Error: {e!s}"
             )
-            raise ValueError(error_msg) from e
+            raise NodeError(error_msg) from e
+        except requests.HTTPError as e:
+            raise request_error(e) from e
 
         result = response.json()
         self.append_value_to_parameter("status", f"DEBUG - Request Response: {result}\n")
 
         if "polling_url" not in result:
-            raise ValueError(f"{self.name}: Unexpected response format (missing polling_url): {result}")
+            raise unexpected_response_error("Black Forest Labs did not return a polling URL for the request.", result)
 
         return result["polling_url"]
 
@@ -482,8 +485,8 @@ class Flux2ImageGeneration(ControlNode):
                             image_url = alt_url
                         else:
                             self.append_value_to_parameter("status", f"Debug - Full API response: {result}\n")
-                            raise ValueError(
-                                f"No image URL found in result. Available keys: {list(result.get('result', {}).keys())}"
+                            raise unexpected_response_error(
+                                "Black Forest Labs finished the request but returned no image URL.", result
                             )
 
                     # Extract the actual seed used by the API
@@ -511,15 +514,11 @@ class Flux2ImageGeneration(ControlNode):
                         "status",
                         "💡 Try: Increase safety_tolerance, use different wording, or avoid restricted content\n",
                     )
-                    raise ValueError(
-                        f"Request blocked by content moderation: {', '.join(moderation_reasons)}. "
-                        f"Try increasing safety_tolerance or modifying your prompt."
-                    )
+                    raise result_error(result)
 
                 elif status == "Error" or status == "Failed":
-                    error_details = result.get("result", {}).get("error", "Unknown error")
                     self.append_value_to_parameter("status", f"API Error Details: {result}\n")
-                    raise ValueError(f"Generation failed with status '{status}': {error_details}")
+                    raise result_error(result)
 
                 else:
                     # Log unknown status for debugging but continue polling
@@ -532,7 +531,7 @@ class Flux2ImageGeneration(ControlNode):
             except requests.RequestException as e:
                 self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
                 if attempt >= max_attempts:
-                    raise
+                    raise request_error(e) from e
                 continue
 
         # Provide more specific timeout message
@@ -562,34 +561,31 @@ class Flux2ImageGeneration(ControlNode):
         self, image_bytes: bytes, output_format: str, api_seed: int | None = None
     ) -> ImageUrlArtifact:
         """Create ImageUrlArtifact by saving to the project file location."""
-        try:
-            # Generate descriptive name using model, seed, and timestamp
-            model = self.get_parameter_value("model").replace("-", "_")
-            timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+        # Generate descriptive name using model, seed, and timestamp
+        model = self.get_parameter_value("model").replace("-", "_")
+        timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
 
-            # Use API seed if available, fallback to user seed, otherwise "random"
-            if api_seed is not None:
-                seed_str = str(api_seed)
-            else:
-                user_seed = self.get_parameter_value("seed")
-                seed_str = str(user_seed) if user_seed is not None and user_seed != -1 else "random"
+        # Use API seed if available, fallback to user seed, otherwise "random"
+        if api_seed is not None:
+            seed_str = str(api_seed)
+        else:
+            user_seed = self.get_parameter_value("seed")
+            seed_str = str(user_seed) if user_seed is not None and user_seed != -1 else "random"
 
-            artifact_name = f"bfl_{model}_{seed_str}_{timestamp}"
+        artifact_name = f"bfl_{model}_{seed_str}_{timestamp}"
 
-            self.append_value_to_parameter(
-                "status",
-                f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n",
-            )
+        self.append_value_to_parameter(
+            "status",
+            f"DEBUG - Creating artifact: {artifact_name}.{output_format.lower()} ({len(image_bytes)} bytes)\n",
+        )
 
-            # Save to project file location and get URL
-            dest = self._output_file.build_file()
-            saved = dest.write_bytes(image_bytes)
+        # Save to project file location and get URL
+        dest = self._output_file.build_file()
+        saved = dest.write_bytes(image_bytes)
 
-            self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
+        self.append_value_to_parameter("status", f"DEBUG - File saved to: {saved.location}\n")
 
-            return ImageUrlArtifact(value=saved.location, name=artifact_name)
-        except Exception as e:
-            raise ValueError(f"Failed to create image artifact: {str(e)}")
+        return ImageUrlArtifact(value=saved.location, name=artifact_name)
 
     def _poll_and_process_result(self, api_key: str, polling_url: str, output_format: str) -> None:
         """Poll for result, download image, and set output - called via yield."""
@@ -667,33 +663,23 @@ class Flux2ImageGeneration(ControlNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
+        # Without a key nothing can run, so it is the only problem reported.
+        if not GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR):
+            return [missing_api_key_error()]
+
         errors = []
 
         # Check for prompt
         prompt = self.get_parameter_value("prompt")
         if not (prompt or self.incoming_connections.get("prompt", False)):
-            errors.append(
-                ValueError(f"{self.name}: Provide a prompt or make a connection to the prompt parameter in this node.")
-            )
-
-        # Check for API key
-        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
-        if not api_key:
-            errors.append(
-                ValueError(
-                    f"{self.name}: BFL API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
-                )
-            )
+            errors.append(NodeError("'Prompt' is empty. Enter a prompt or connect one to it."))
 
         # Validate seed if provided
         seed = self.get_parameter_value("seed")
         if seed is not None and not isinstance(seed, int):
-            errors.append(ValueError(f"{self.name}: Seed must be an integer"))
+            errors.append(NodeError("'Seed' must be a whole number."))
 
         return errors if errors else None
-
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        return self.validate_before_node_run()
 
     def process(self) -> AsyncResult[None]:
         """Non-blocking entry point for Griptape engine."""
@@ -709,7 +695,7 @@ class Flux2ImageGeneration(ControlNode):
             output_format = self.get_parameter_value("output_format")
             prompt = self.get_parameter_value("prompt")
             if not prompt:
-                raise ValueError("Prompt is required and cannot be empty")
+                raise NodeError("'Prompt' is empty. Enter a prompt or connect one to it.")
 
             model = self.get_parameter_value("model")
 
