@@ -519,14 +519,6 @@ class KontextImageEdit(ControlNode):
 
         return errors if errors else None
 
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        # Only the API key is checked before the flow starts. A problem found here is reported as a toast
-        # and no node shows an error. The inputs can come from upstream nodes, so they are checked when
-        # this node runs, where a failure shows on the node's header.
-        if GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR):
-            return None
-        return [missing_api_key_error()]
-
     def process(self) -> AsyncResult[None]:
         """Non-blocking entry point for Griptape engine."""
         yield lambda: self._process()

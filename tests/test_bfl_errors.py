@@ -276,17 +276,33 @@ def test_a_node_file_loads_the_way_the_engine_loads_it(
 
 
 @pytest.mark.parametrize(("module_name", "class_name"), NODES)
-def test_the_check_before_the_flow_starts_covers_only_the_api_key(module_name: str, class_name: str) -> None:
-    """A problem found before the flow starts shows as a toast, with no error on any node's header."""
+def test_nothing_is_checked_before_the_flow_starts(module_name: str, class_name: str) -> None:
+    """A problem found before the flow starts shows as a toast with no link and no error on a node's header.
+
+    The key and the inputs are checked when the node runs instead.
+    """
     module, node = _load(module_name, class_name)
 
     with patch.object(module, "GriptapeNodes") as engine:
         engine.SecretsManager.return_value.get_secret.return_value = None
-        errors = node.validate_before_workflow_run()
+        before_flow = node.validate_before_workflow_run()
 
-    assert errors is not None
-    assert len(errors) == 1
-    assert "BFL_API_KEY" in str(errors[0])
+    assert not before_flow
+
+
+@pytest.mark.parametrize(("module_name", "class_name"), NODES)
+def test_a_missing_key_is_reported_when_the_node_runs_with_a_link_to_the_secret(
+    module_name: str, class_name: str
+) -> None:
+    module, node = _load(module_name, class_name)
+
+    with patch.object(module, "GriptapeNodes") as engine:
+        engine.SecretsManager.return_value.get_secret.return_value = None
+        errors = node.validate_before_node_run()
+
+    key_errors = [error for error in errors or [] if "BFL_API_KEY" in str(error)]
+    assert len(key_errors) == 1
+    assert key_errors[0].links[0].url == "#settings-secrets?filter=BFL_API_KEY"
 
 
 @pytest.mark.parametrize(("module_name", "class_name"), NODES)
@@ -296,10 +312,8 @@ def test_missing_inputs_are_reported_when_the_node_runs(module_name: str, class_
 
     with patch.object(module, "GriptapeNodes") as engine:
         engine.SecretsManager.return_value.get_secret.return_value = "key"
-        before_flow = node.validate_before_workflow_run()
         when_run = node.validate_before_node_run()
 
-    assert before_flow is None
     assert when_run
     assert all(isinstance(error, NodeError) for error in when_run)
 
