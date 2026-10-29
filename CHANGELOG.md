@@ -10,4 +10,4 @@ the `library_version` in `griptape_nodes_library_blackforestlabs/griptape_nodes_
 
 <!-- Entries go in changelog.d/, one file each. See changelog.d/README.md. -->
 
-[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-blackforestlabs/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-blackforestlabs/compare/ffa90d99c3e93f08cd19aad1a58602d45e1426df...HEAD
