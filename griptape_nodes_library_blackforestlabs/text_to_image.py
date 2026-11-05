@@ -8,7 +8,6 @@ from bfl_errors import (
     API_KEY_URL,
     PROVIDER,
     result_error,
-    unexpected_response_error,
 )
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
@@ -408,7 +407,7 @@ class TextToImage(ControlNode):
 
         result = response.json()
         if "polling_url" not in result:
-            raise unexpected_response_error("Black Forest Labs did not return a polling URL for the request.", result)
+            raise NodeError("Black Forest Labs did not return a polling URL for the request.", response=result)
 
         return result["polling_url"]
 
@@ -471,8 +470,8 @@ class TextToImage(ControlNode):
                     if status == "Ready":
                         image_url = result.get("result", {}).get("sample")
                         if not image_url:
-                            raise unexpected_response_error(
-                                "Black Forest Labs finished the request but returned no image URL.", result
+                            raise NodeError(
+                                "Black Forest Labs finished the request but returned no image URL.", response=result
                             )
 
                         api_seed = result.get("result", {}).get("seed")

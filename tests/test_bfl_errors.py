@@ -17,7 +17,6 @@ from bfl_errors import (
     API_KEY_URL,
     PROVIDER,
     result_error,
-    unexpected_response_error,
 )
 from griptape_nodes.exe_types.core_types import NodeError
 
@@ -125,22 +124,6 @@ def test_a_failed_result_without_a_reason_says_so() -> None:
     error = result_error({"status": "Failed"})
 
     assert str(error) == "Black Forest Labs ended the request with status 'Failed' and gave no reason."
-
-
-def test_unexpected_response_error_attaches_the_response() -> None:
-    result = {"id": "req-3", "unexpected": True}
-
-    error = unexpected_response_error("Black Forest Labs did not return a polling URL for the request.", result)
-
-    assert error.fields == {"request_id": "req-3"}
-    assert error.response == result
-
-
-def test_unexpected_response_error_with_nothing_to_attach() -> None:
-    error = unexpected_response_error("No image.", None)
-
-    assert error.fields == {}
-    assert error.response is None
 
 
 @pytest.mark.parametrize(("module_name", "class_name"), NODES)

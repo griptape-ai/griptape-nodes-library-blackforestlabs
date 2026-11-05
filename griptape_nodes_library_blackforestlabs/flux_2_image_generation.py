@@ -8,7 +8,6 @@ from bfl_errors import (
     API_KEY_URL,
     PROVIDER,
     result_error,
-    unexpected_response_error,
 )
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
@@ -409,7 +408,7 @@ class Flux2ImageGeneration(ControlNode):
         self.append_value_to_parameter("status", f"DEBUG - Request Response: {result}\n")
 
         if "polling_url" not in result:
-            raise unexpected_response_error("Black Forest Labs did not return a polling URL for the request.", result)
+            raise NodeError("Black Forest Labs did not return a polling URL for the request.", response=result)
 
         return result["polling_url"]
 
@@ -485,8 +484,8 @@ class Flux2ImageGeneration(ControlNode):
                             image_url = alt_url
                         else:
                             self.append_value_to_parameter("status", f"Debug - Full API response: {result}\n")
-                            raise unexpected_response_error(
-                                "Black Forest Labs finished the request but returned no image URL.", result
+                            raise NodeError(
+                                "Black Forest Labs finished the request but returned no image URL.", response=result
                             )
 
                     # Extract the actual seed used by the API
