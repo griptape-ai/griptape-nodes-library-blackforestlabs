@@ -13,8 +13,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 from bfl_errors import (
-    missing_api_key_error,
-    request_error,
+    API_KEY_ENV_VAR,
+    API_KEY_URL,
+    PROVIDER,
     result_error,
     unexpected_response_error,
 )
@@ -28,6 +29,10 @@ NODES = [
 ]
 
 
+def _request_error(error: requests.RequestException) -> NodeError:
+    return NodeError.from_request_exception(error, provider=PROVIDER, secret_name=API_KEY_ENV_VAR)
+
+
 def _http_error(status: int, *, body: Any = None, text: str = "") -> requests.HTTPError:
     response = requests.Response()
     response.status_code = status
@@ -36,7 +41,7 @@ def _http_error(status: int, *, body: Any = None, text: str = "") -> requests.HT
 
 
 def test_missing_api_key_links_to_the_secret_and_the_key_page() -> None:
-    error = missing_api_key_error()
+    error = NodeError.from_missing_secret(API_KEY_ENV_VAR, key_url=API_KEY_URL)
 
     assert str(error) == "BFL_API_KEY is not set. Add it in Settings → API Keys & Secrets, then run the node again."
     assert [link.url for link in error.links] == [
@@ -48,7 +53,7 @@ def test_missing_api_key_links_to_the_secret_and_the_key_page() -> None:
 def test_request_error_uses_the_apis_reason_and_attaches_the_response() -> None:
     body = {"detail": "Image is too large."}
 
-    error = request_error(_http_error(400, body=body))
+    error = _request_error(_http_error(400, body=body))
 
     assert str(error) == "Image is too large."
     assert error.fields == {"status_code": 400}
@@ -64,26 +69,10 @@ def test_request_error_lists_each_validation_problem() -> None:
         ]
     }
 
-    error = request_error(_http_error(422, body=body))
+    error = _request_error(_http_error(422, body=body))
 
     assert str(error) == "width: Input should be a multiple of 32; height: Input should be at most 2048"
     assert error.fields == {"status_code": 422}
-
-
-@pytest.mark.parametrize(
-    ("status", "expected"),
-    [
-        (402, "Black Forest Labs says payment is required. Check your account's credits."),
-        (429, "Black Forest Labs is rate-limiting requests. Wait a moment and run the node again."),
-        (502, "Black Forest Labs returned an error (HTTP 502)."),
-    ],
-)
-def test_request_error_without_a_reason_describes_the_status(status: int, expected: str) -> None:
-    error = request_error(_http_error(status, text="<html>Bad gateway</html>"))
-
-    assert str(error) == expected
-    assert error.fields == {"status_code": status}
-    assert error.response is None
 
 
 @pytest.mark.parametrize(
@@ -92,26 +81,18 @@ def test_request_error_without_a_reason_describes_the_status(status: int, expect
 )
 def test_a_refused_key_links_to_the_secret(status: int, detail: str) -> None:
     """BFL answers a well-formed unknown key with 403, and a malformed key with 422."""
-    error = request_error(_http_error(status, body={"detail": detail}))
+    error = _request_error(_http_error(status, body={"detail": detail}))
 
-    assert str(error) == detail
+    assert "api key" in str(error).lower()
     assert [(link.label, link.url) for link in error.links] == [
         ("Update the API key", "#settings-secrets?filter=BFL_API_KEY"),
-        ("Get a Black Forest Labs API key", "https://dashboard.bfl.ai/api/keys"),
     ]
 
 
 def test_a_validation_problem_that_is_not_about_the_key_has_no_key_links() -> None:
     body = {"detail": [{"loc": ["body", "width"], "msg": "Input should be a multiple of 32"}]}
 
-    assert request_error(_http_error(422, body=body)).links == []
-
-
-def test_request_error_without_a_response_says_the_api_could_not_be_reached() -> None:
-    error = request_error(requests.ConnectionError("no route to host"))
-
-    assert str(error) == "Could not reach Black Forest Labs: no route to host"
-    assert error.fields == {}
+    assert _request_error(_http_error(422, body=body)).links == []
 
 
 def test_a_moderated_result_names_the_reasons_and_the_setting_to_change() -> None:

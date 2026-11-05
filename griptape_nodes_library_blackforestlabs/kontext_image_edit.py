@@ -5,8 +5,8 @@ from typing import Any
 import requests
 from bfl_errors import (
     API_KEY_ENV_VAR,
-    missing_api_key_error,
-    request_error,
+    API_KEY_URL,
+    PROVIDER,
     result_error,
     unexpected_response_error,
 )
@@ -190,7 +190,7 @@ class KontextImageEdit(ControlNode):
         """Retrieve the BFL API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
-            raise missing_api_key_error()
+            raise NodeError.from_missing_secret(API_KEY_ENV_VAR, key_url=API_KEY_URL)
         return api_key
 
     def _image_to_base64(self, image_artifact) -> str:
@@ -274,7 +274,7 @@ class KontextImageEdit(ControlNode):
             )
             raise NodeError(error_msg) from e
         except requests.HTTPError as e:
-            raise request_error(e) from e
+            raise NodeError.from_request_exception(e, provider=PROVIDER, secret_name=API_KEY_ENV_VAR) from e
 
         result = response.json()
         self.append_value_to_parameter("status", f"DEBUG - Request Response: {result}\n")
@@ -402,7 +402,7 @@ class KontextImageEdit(ControlNode):
             except requests.RequestException as e:
                 self.append_value_to_parameter("status", f"Request error on attempt {attempt}: {str(e)}\n")
                 if attempt >= max_attempts:
-                    raise request_error(e) from e
+                    raise NodeError.from_request_exception(e, provider=PROVIDER, secret_name=API_KEY_ENV_VAR) from e
                 continue
 
         # Provide more specific timeout message
@@ -497,7 +497,7 @@ class KontextImageEdit(ControlNode):
         """Validate node configuration before execution."""
         # Without a key nothing can run, so it is the only problem reported.
         if not GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR):
-            return [missing_api_key_error()]
+            return [NodeError.from_missing_secret(API_KEY_ENV_VAR, key_url=API_KEY_URL)]
 
         errors = []
 
